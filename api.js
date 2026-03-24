@@ -1,7 +1,12 @@
 import { COURTS } from './courts.js';
 import { distanceMiles } from './geo.js';
 
-const HEADERS = { 'User-Agent': 'sf-tennis-cli/1.0' };
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+  'Origin': 'https://www.rec.us',
+  'Referer': 'https://www.rec.us/',
+  'Accept': 'application/json',
+};
 
 // Resolve a court slug to its rec.us locationId by scraping the HTML
 async function resolveLocationId(slug) {
@@ -40,13 +45,24 @@ async function fetchCourtData(court, date, refLat, refLng) {
   const lng = parseFloat(loc.lng);
   const dist = Math.round(distanceMiles(refLat, refLng, lat, lng) * 100) / 100;
 
+  // Build a map of court number -> slot duration from location data
+  const courtMeta = {};
+  for (const c of loc.courts ?? []) {
+    courtMeta[c.courtNumber] = parseMinutes(c.maxReservationTime);
+  }
+
   const todayCourts = schedRes.dates?.[dateKey] ?? [];
   const courts = todayCourts.map((c) => {
+    const slotDuration = courtMeta[c.courtNumber] || 60;
     const available = [];
     const booked = [];
     for (const [range, info] of Object.entries(c.schedule ?? {})) {
-      if (info.referenceType === 'RESERVABLE') available.push(range);
-      else if (info.referenceType === 'RESERVATION') booked.push(range);
+      const [start, end] = range.split(',').map((s) => s.trim());
+      if (info.referenceType === 'RESERVABLE') {
+        available.push(...splitIntoSlots(start, end, slotDuration));
+      } else if (info.referenceType === 'RESERVATION') {
+        booked.push({ start, end });
+      }
     }
     return { courtNumber: c.courtNumber, sports: c.sports?.map((s) => s.name), available, booked };
   });
@@ -81,15 +97,16 @@ export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRa
     filtered = filtered.filter((r) => r.distance <= maxDistance);
   }
 
-  // Filter by time range
+  // Filter by time range (overlap check)
   if (timeRange) {
     const [startHour, endHour] = timeRange;
     filtered = filtered.map((r) => {
       const courts = r.courts.map((c) => ({
         ...c,
         available: c.available.filter((slot) => {
-          const hour = parseSlotStartHour(slot);
-          return hour != null && hour >= startHour && hour < endHour;
+          const slotStart = parseHour(slot.start);
+          const slotEnd = parseHour(slot.end);
+          return slotStart != null && slotEnd != null && slotStart < endHour && slotEnd > startHour;
         }),
       }));
       return {
@@ -108,13 +125,39 @@ export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRa
   return { courts: filtered, errors: errors.length };
 }
 
-// Parse "7:00am-8:00am" -> 7, "2:00pm-3:00pm" -> 14
-function parseSlotStartHour(slot) {
-  const match = slot.match(/^(\d{1,2}):(\d{2})(am|pm)/i);
-  if (!match) return null;
-  let hour = parseInt(match[1], 10);
-  const period = match[3].toLowerCase();
-  if (period === 'pm' && hour !== 12) hour += 12;
-  if (period === 'am' && hour === 12) hour = 0;
-  return hour;
+// Parse "18:00" -> 18
+function parseHour(time) {
+  const m = time?.match(/^(\d{1,2}):/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Parse "01:30:00" -> 90 (minutes)
+function parseMinutes(duration) {
+  if (!duration) return 60;
+  const [h, m] = duration.split(':').map(Number);
+  return h * 60 + m;
+}
+
+// Convert "HH:MM" to total minutes from midnight
+function timeToMinutes(time) {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
+// Convert total minutes to "HH:MM"
+function minutesToTime(mins) {
+  const h = String(Math.floor(mins / 60)).padStart(2, '0');
+  const m = String(mins % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+// Split a RESERVABLE range into individual bookable slots
+function splitIntoSlots(start, end, durationMins) {
+  const startMins = timeToMinutes(start);
+  const endMins = timeToMinutes(end);
+  const slots = [];
+  for (let t = startMins; t + durationMins <= endMins; t += durationMins) {
+    slots.push({ start: minutesToTime(t), end: minutesToTime(t + durationMins) });
+  }
+  return slots;
 }

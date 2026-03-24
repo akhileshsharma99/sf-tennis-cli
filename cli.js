@@ -2,6 +2,7 @@
 
 import { program } from 'commander';
 import chalk from 'chalk';
+import dayjs from 'dayjs';
 import { fetchAllCourts } from './api.js';
 import { getLocation, getDefaultLocation, addLocation, removeLocation, listLocations, setDefaultLocation } from './locations.js';
 import { getCurrentLocation } from './geo.js';
@@ -10,13 +11,13 @@ import { getCurrentLocation } from './geo.js';
 program
   .name('tennis')
   .description('Find available SF tennis court times near you')
-  .option('-d, --date <YYYY-MM-DD>', 'date to check (default: today)')
+  .option('-d, --date <date>', 'date: YYYY-MM-DD, day name (thursday, th), "tomorrow", "today" (default: today)')
   .option('-l, --location <name>', 'saved location name, "current", or "lat,lng" (default: your default location)')
   .option('-r, --range <start-end>', 'time range filter, e.g. "9-17" for 9am-5pm')
   .option('-m, --max-distance <miles>', 'max distance in miles', parseFloat)
   .option('--json', 'output raw JSON')
   .action(async (opts) => {
-    const date = opts.date || new Date().toISOString().slice(0, 10);
+    const date = opts.date ? parseDate(opts.date) : dayjs().format('YYYY-MM-DD');
 
     // Resolve reference location
     let refLat, refLng, refLabel;
@@ -109,13 +110,14 @@ program
         ? chalk.green(`${r.totalAvailableSlots} slots`)
         : chalk.red('no slots');
 
-      console.log(`${chalk.bold(r.name)} ${distStr} — ${slotsStr}`);
-      console.log(chalk.dim(`  ${r.address}`));
+      const link = `\x1b]8;;${r.url}\x1b\\${r.name}\x1b]8;;\x1b\\`;
+      console.log(`${chalk.bold(link)} ${distStr} — ${slotsStr}`);
+      console.log(chalk.dim(`  ${r.address} · ${r.url}`));
 
       for (const court of r.courts) {
         if (court.available.length === 0) continue;
-        const times = court.available.map((s) => chalk.green(s)).join(', ');
-        console.log(`  Court ${court.courtNumber}: ${times}`);
+        const times = court.available.map((s) => chalk.green(`${s.start}–${s.end}`)).join(', ');
+        console.log(`  ${court.courtNumber}: ${times}`);
       }
       console.log();
     }
@@ -177,6 +179,31 @@ loc
       process.exit(1);
     }
   });
+
+const DAY_NAMES = {
+  su: 0, sun: 0, sunday: 0,
+  mo: 1, mon: 1, monday: 1,
+  tu: 2, tue: 2, tuesday: 2,
+  we: 3, wed: 3, wednesday: 3,
+  th: 4, thu: 4, thursday: 4,
+  fr: 5, fri: 5, friday: 5,
+  sa: 6, sat: 6, saturday: 6,
+};
+
+function parseDate(input) {
+  const s = input.trim().toLowerCase();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (s === 'today') return dayjs().format('YYYY-MM-DD');
+  if (s === 'tomorrow') return dayjs().add(1, 'day').format('YYYY-MM-DD');
+  const targetDay = DAY_NAMES[s];
+  if (targetDay != null) {
+    let d = dayjs().day(targetDay);
+    if (d.isBefore(dayjs(), 'day') || d.isSame(dayjs(), 'day')) d = d.add(7, 'day');
+    return d.format('YYYY-MM-DD');
+  }
+  console.error(chalk.red(`Invalid date: "${input}". Use YYYY-MM-DD, a day name (thu, thursday), "today", or "tomorrow".`));
+  process.exit(1);
+}
 
 function formatHour(h) {
   if (h === 0 || h === 24) return '12am';
