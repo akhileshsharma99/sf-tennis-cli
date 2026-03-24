@@ -7,7 +7,7 @@
     "tennis": "./cli.js"
   },
   "scripts": {
-    "start": "node cli.js"
+    "start": "bun cli.js"
   },
   "dependencies": {
     "chalk": "^5.3.0",

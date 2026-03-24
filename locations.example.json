@@ -1,0 +1,14 @@
+[
+  {
+    "name": "home",
+    "address": "1 Dr Carlton B Goodlett Pl, San Francisco, CA",
+    "lat": 37.7793,
+    "lng": -122.4193
+  },
+  {
+    "name": "work",
+    "address": "123 Main St, San Francisco, CA",
+    "lat": 37.7905,
+    "lng": -122.3988
+  }
+]

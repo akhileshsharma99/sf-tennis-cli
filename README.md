@@ -5,8 +5,8 @@ CLI to find available tennis court times across all 27 SF Rec & Park courts. Fet
 ## Setup
 
 ```bash
-npm install
-npm link  # makes `tennis` available globally
+bun install
+bun link  # makes `tennis` available globally
 ```
 
 ### Add your locations
