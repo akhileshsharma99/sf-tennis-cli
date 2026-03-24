@@ -3,7 +3,7 @@
 import { program } from 'commander';
 import chalk from 'chalk';
 import { fetchAllCourts } from './api.js';
-import { getLocation, addLocation, removeLocation, listLocations } from './locations.js';
+import { getLocation, getDefaultLocation, addLocation, removeLocation, listLocations, setDefaultLocation } from './locations.js';
 import { getCurrentLocation } from './geo.js';
 
 // --- Main command: find courts ---
@@ -11,7 +11,7 @@ program
   .name('tennis')
   .description('Find available SF tennis court times near you')
   .option('-d, --date <YYYY-MM-DD>', 'date to check (default: today)')
-  .option('-l, --location <name>', 'saved location name, "current", or "lat,lng" (default: home)')
+  .option('-l, --location <name>', 'saved location name, "current", or "lat,lng" (default: your default location)')
   .option('-r, --range <start-end>', 'time range filter, e.g. "9-17" for 9am-5pm')
   .option('-m, --max-distance <miles>', 'max distance in miles', parseFloat)
   .option('--json', 'output raw JSON')
@@ -20,9 +20,19 @@ program
 
     // Resolve reference location
     let refLat, refLng, refLabel;
-    const locStr = (opts.location || 'home').toLowerCase();
+    const locStr = opts.location?.toLowerCase();
 
-    if (locStr === 'current') {
+    if (!locStr) {
+      const def = getDefaultLocation();
+      if (!def || def.lat == null) {
+        console.error(chalk.red('No default location set.'));
+        console.error(chalk.dim('Add one with: tennis location add <name> "<address>"'));
+        process.exit(1);
+      }
+      refLat = def.lat;
+      refLng = def.lng;
+      refLabel = `${def.name} (${def.address})`;
+    } else if (locStr === 'current') {
       process.stdout.write(chalk.dim('Getting current location... '));
       const loc = await getCurrentLocation();
       if (!loc) {
@@ -70,7 +80,7 @@ program
     console.log();
 
     process.stdout.write(chalk.dim('Fetching court data...'));
-    const results = await fetchAllCourts({
+    const { courts: results, errors } = await fetchAllCourts({
       date,
       refLat,
       refLng,
@@ -78,6 +88,10 @@ program
       timeRange,
     });
     process.stdout.write('\r' + ' '.repeat(30) + '\r');
+
+    if (errors > 0) {
+      console.log(chalk.yellow(`${errors} court(s) failed to load.`));
+    }
 
     if (opts.json) {
       console.log(JSON.stringify(results, null, 2));
@@ -118,7 +132,7 @@ loc
   .action(async (name, address) => {
     const result = await addLocation(name, address);
     if (result) {
-      console.log(chalk.green(`Saved "${name}" → ${result.lat}, ${result.lng}`));
+      console.log(chalk.green(`Saved "${name}" → ${result.address}`));
     } else {
       console.error(chalk.red('Could not geocode that address. Try a more specific one.'));
       process.exit(1);
@@ -147,8 +161,20 @@ loc
       return;
     }
     for (const l of locs) {
-      const coords = l.lat != null ? chalk.dim(`(${l.lat}, ${l.lng})`) : chalk.yellow('(not geocoded)');
-      console.log(`  ${chalk.bold(l.name)}: ${l.address} ${coords}`);
+      const def = l.default ? chalk.cyan(' (default)') : '';
+      console.log(`  ${chalk.bold(l.name)}: ${l.address}${def}`);
+    }
+  });
+
+loc
+  .command('default <name>')
+  .description('Set a location as the default')
+  .action((name) => {
+    if (setDefaultLocation(name)) {
+      console.log(chalk.green(`Default location set to "${name}".`));
+    } else {
+      console.error(chalk.red(`Location "${name}" not found.`));
+      process.exit(1);
     }
   });
 

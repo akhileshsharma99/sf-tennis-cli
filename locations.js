@@ -62,6 +62,7 @@ export async function addLocation(name, address) {
   console.log('done');
 
   const loc = { name, address, lat: coords.lat, lng: coords.lng };
+  if (locations.length === 0) loc.default = true;
   locations.push(loc);
   writeLocationsFile(locations);
   return loc;
@@ -73,6 +74,23 @@ export function removeLocation(name) {
   const idx = locations.findIndex((l) => l.name.toLowerCase() === name.toLowerCase());
   if (idx === -1) return false;
   locations.splice(idx, 1);
+  writeLocationsFile(locations);
+  return true;
+}
+
+// Get the default location (the one with "default": true, or the first one)
+export function getDefaultLocation() {
+  const locations = readLocationsFile();
+  return locations.find((l) => l.default) ?? locations[0] ?? null;
+}
+
+// Set a location as the default
+export function setDefaultLocation(name) {
+  const locations = readLocationsFile();
+  const idx = locations.findIndex((l) => l.name.toLowerCase() === name.toLowerCase());
+  if (idx === -1) return false;
+  for (const l of locations) delete l.default;
+  locations[idx].default = true;
   writeLocationsFile(locations);
   return true;
 }

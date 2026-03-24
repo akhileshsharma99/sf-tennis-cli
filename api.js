@@ -1,12 +1,21 @@
 import { COURTS } from './courts.js';
 import { distanceMiles } from './geo.js';
 
+const HEADERS = { 'User-Agent': 'sf-tennis-cli/1.0' };
+
 // Resolve a court slug to its rec.us locationId by scraping the HTML
 async function resolveLocationId(slug) {
-  const res = await fetch(`https://www.rec.us/${slug}`);
+  const res = await fetch(`https://www.rec.us/${slug}`, { headers: HEADERS });
   const html = await res.text();
   const match = html.match(/"locationId":"([^"]+)"/);
   return match?.[1] ?? null;
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url, { headers: HEADERS });
+  if (!res.ok) return null;
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 // Fetch location details + schedule for a single court
@@ -18,9 +27,13 @@ async function fetchCourtData(court, date, refLat, refLng) {
 
   const dateKey = date.replace(/-/g, '');
   const [locRes, schedRes] = await Promise.all([
-    fetch(`https://api.rec.us/v1/locations/${locationId}?publishedSites=true`).then((r) => r.json()),
-    fetch(`https://api.rec.us/v1/locations/${locationId}/schedule?startDate=${date}`).then((r) => r.json()),
+    fetchJson(`https://api.rec.us/v1/locations/${locationId}?publishedSites=true`),
+    fetchJson(`https://api.rec.us/v1/locations/${locationId}/schedule?startDate=${date}`),
   ]);
+
+  if (!locRes || !schedRes) {
+    return { ...court, error: 'API request failed' };
+  }
 
   const loc = locRes.location ?? locRes;
   const lat = parseFloat(loc.lat);
@@ -55,9 +68,12 @@ async function fetchCourtData(court, date, refLat, refLng) {
 // Fetch all courts, sorted by distance
 export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRange }) {
   const results = await Promise.all(
-    COURTS.map((court) => fetchCourtData(court, date, refLat, refLng))
+    COURTS.map((court) =>
+      fetchCourtData(court, date, refLat, refLng).catch(() => ({ ...court, error: 'fetch failed' }))
+    )
   );
 
+  const errors = results.filter((r) => r.error);
   let filtered = results.filter((r) => !r.error);
 
   // Filter by max distance
@@ -89,7 +105,7 @@ export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRa
   // Sort by distance
   filtered.sort((a, b) => a.distance - b.distance);
 
-  return filtered;
+  return { courts: filtered, errors: errors.length };
 }
 
 // Parse "7:00am-8:00am" -> 7, "2:00pm-3:00pm" -> 14

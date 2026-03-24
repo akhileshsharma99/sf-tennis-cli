@@ -22,10 +22,9 @@ Addresses are automatically geocoded via the US Census Bureau API (free, no key 
 ## Usage
 
 ```bash
-tennis                          # courts near "home" location, today
+tennis                          # courts near your default location, today
 tennis -l work                  # courts near your "work" location
 tennis -l current               # courts near your current IP location
-tennis -l 37.78,-122.41         # courts near a custom lat/lng
 tennis -m 1.5                   # only courts within 1.5 miles
 tennis -r 9-17                  # only slots between 9am-5pm
 tennis -d 2026-03-25            # check a specific date
@@ -39,17 +38,20 @@ tennis --json                   # raw JSON output
 tennis location list            # show all saved locations
 tennis location add <name> "<address>"
 tennis location remove <name>
+tennis location default <name>  # set default locationok 
 ```
 
 ### Options
 
-| Flag | Description |
-|------|-------------|
-| `-d, --date <YYYY-MM-DD>` | Date to check (default: today) |
-| `-l, --location <name>` | Saved name, `current`, or `lat,lng` (default: home) |
-| `-r, --range <start-end>` | Time range filter in 24h, e.g. `9-17` |
-| `-m, --max-distance <miles>` | Max distance in miles |
-| `--json` | Output raw JSON |
+
+| Flag                         | Description                                                       |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `-d, --date <YYYY-MM-DD>`    | Date to check (default: today)                                    |
+| `-l, --location <name>`      | Saved location name or `current` (default: your default location) |
+| `-r, --range <start-end>`    | Time range filter in 24h, e.g. `9-17`                             |
+| `-m, --max-distance <miles>` | Max distance in miles                                             |
+| `--json`                     | Output raw JSON                                                   |
+
 
 ## Data Source
 
