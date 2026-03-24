@@ -10,7 +10,7 @@ export function distanceMiles(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Get current location via macOS CoreLocation (falls back to IP-based)
+// Get current location via IP geolocation
 export async function getCurrentLocation() {
   try {
     const res = await fetch('https://ipinfo.io/json');
@@ -20,4 +20,17 @@ export async function getCurrentLocation() {
   } catch {
     return null;
   }
+}
+
+// Geocode an address to lat/lng using US Census Bureau (free, no API key)
+export async function geocode(address) {
+  const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(address)}&benchmark=Public_AR_Current&format=json`;
+  const res = await fetch(url);
+  const data = await res.json();
+  const match = data.result?.addressMatches?.[0];
+  if (!match) return null;
+  return {
+    lat: match.coordinates.y,
+    lng: match.coordinates.x,
+  };
 }

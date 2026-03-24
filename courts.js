@@ -28,16 +28,3 @@ export const COURTS = [
   { slug: 'sunset',          name: 'Sunset Rec' },
   { slug: 'uppernoe',        name: 'Upper Noe' },
 ];
-
-// Known locations — "home" is loaded from env vars
-export function getLocations() {
-  const locations = {};
-  if (process.env.TENNIS_HOME_LAT && process.env.TENNIS_HOME_LNG) {
-    locations.home = {
-      lat: parseFloat(process.env.TENNIS_HOME_LAT),
-      lng: parseFloat(process.env.TENNIS_HOME_LNG),
-      label: process.env.TENNIS_HOME_LABEL || 'Home',
-    };
-  }
-  return locations;
-}

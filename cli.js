@@ -1,36 +1,17 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { program } from 'commander';
 import chalk from 'chalk';
 import { fetchAllCourts } from './api.js';
-import { getLocations } from './courts.js';
+import { getLocation, addLocation, removeLocation, listLocations } from './locations.js';
 import { getCurrentLocation } from './geo.js';
 
-// Load .env from the package directory
-const __dirname = dirname(fileURLToPath(import.meta.url));
-try {
-  const envFile = readFileSync(resolve(__dirname, '.env'), 'utf8');
-  for (const line of envFile.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx === -1) continue;
-    const key = trimmed.slice(0, idx);
-    const val = trimmed.slice(idx + 1);
-    if (!(key in process.env)) process.env[key] = val;
-  }
-} catch {}
-
-const LOCATIONS = getLocations();
-
+// --- Main command: find courts ---
 program
   .name('tennis')
   .description('Find available SF tennis court times near you')
   .option('-d, --date <YYYY-MM-DD>', 'date to check (default: today)')
-  .option('-l, --location <name>', 'reference location: "home", "current", or "lat,lng" (default: home)')
+  .option('-l, --location <name>', 'saved location name, "current", or "lat,lng" (default: home)')
   .option('-r, --range <start-end>', 'time range filter, e.g. "9-17" for 9am-5pm')
   .option('-m, --max-distance <miles>', 'max distance in miles', parseFloat)
   .option('--json', 'output raw JSON')
@@ -52,21 +33,22 @@ program
       refLng = loc.lng;
       refLabel = loc.label;
       console.log(chalk.dim(refLabel));
-    } else if (LOCATIONS[locStr]) {
-      refLat = LOCATIONS[locStr].lat;
-      refLng = LOCATIONS[locStr].lng;
-      refLabel = LOCATIONS[locStr].label;
-    } else if (locStr.includes(',')) {
+    } else if (locStr.includes(',') && locStr.split(',').every((s) => !isNaN(parseFloat(s)))) {
       const [lat, lng] = locStr.split(',').map(Number);
       refLat = lat;
       refLng = lng;
       refLabel = `${lat}, ${lng}`;
-    } else if (locStr === 'home') {
-      console.error(chalk.red('Home location not set. Add TENNIS_HOME_LAT and TENNIS_HOME_LNG to .env'));
-      process.exit(1);
     } else {
-      console.error(chalk.red(`Unknown location: "${locStr}". Use "home", "current", or "lat,lng".`));
-      process.exit(1);
+      const loc = await getLocation(locStr);
+      if (!loc || loc.lat == null) {
+        console.error(chalk.red(`Unknown location: "${locStr}".`));
+        console.error(chalk.dim('Add it with: tennis location add <name> "<address>"'));
+        console.error(chalk.dim('Or use: -l current, -l lat,lng'));
+        process.exit(1);
+      }
+      refLat = loc.lat;
+      refLng = loc.lng;
+      refLabel = `${loc.name} (${loc.address})`;
     }
 
     // Parse time range
@@ -125,6 +107,49 @@ program
     }
 
     console.log(chalk.dim(`${results.length} courts shown. Book at https://www.rec.us`));
+  });
+
+// --- Subcommand: manage locations ---
+const loc = program.command('location').description('Manage saved locations');
+
+loc
+  .command('add <name> <address>')
+  .description('Add a named location (geocodes the address automatically)')
+  .action(async (name, address) => {
+    const result = await addLocation(name, address);
+    if (result) {
+      console.log(chalk.green(`Saved "${name}" → ${result.lat}, ${result.lng}`));
+    } else {
+      console.error(chalk.red('Could not geocode that address. Try a more specific one.'));
+      process.exit(1);
+    }
+  });
+
+loc
+  .command('remove <name>')
+  .description('Remove a saved location')
+  .action((name) => {
+    if (removeLocation(name)) {
+      console.log(chalk.green(`Removed "${name}".`));
+    } else {
+      console.error(chalk.red(`Location "${name}" not found.`));
+      process.exit(1);
+    }
+  });
+
+loc
+  .command('list')
+  .description('List all saved locations')
+  .action(() => {
+    const locs = listLocations();
+    if (locs.length === 0) {
+      console.log(chalk.dim('No saved locations. Add one with: tennis location add <name> "<address>"'));
+      return;
+    }
+    for (const l of locs) {
+      const coords = l.lat != null ? chalk.dim(`(${l.lat}, ${l.lng})`) : chalk.yellow('(not geocoded)');
+      console.log(`  ${chalk.bold(l.name)}: ${l.address} ${coords}`);
+    }
   });
 
 function formatHour(h) {
