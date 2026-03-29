@@ -6,7 +6,11 @@
 process.env.TZ = "America/Los_Angeles";
 
 import { resolve } from "node:path";
-import type { TimeSlot } from "./src/api";
+import type {
+	RecUsLocationResponse,
+	ScheduleResponse,
+	TimeSlot,
+} from "./src/api";
 import {
 	buildCourtMeta,
 	computeReleaseDate,
@@ -46,41 +50,6 @@ interface GroupedNotification {
 }
 
 type DedupCache = Record<string, number>;
-
-interface RecUsLocationResponse {
-	location?: {
-		lat: string;
-		lng: string;
-		formattedAddress: string;
-		courts?: Array<{
-			courtNumber: string;
-			maxReservationTime?: string;
-			defaultReservationWindowDays?: number;
-			reservationReleaseTimeLocal?: string;
-			sports?: Array<{ name: string }>;
-		}>;
-	};
-	lat?: string;
-	lng?: string;
-	formattedAddress?: string;
-	courts?: Array<{
-		courtNumber: string;
-		maxReservationTime?: string;
-		defaultReservationWindowDays?: number;
-		reservationReleaseTimeLocal?: string;
-		sports?: Array<{ name: string }>;
-	}>;
-}
-
-interface ScheduleCourtDay {
-	courtNumber: string;
-	schedule: Record<string, { referenceType: string }>;
-	sports?: Array<{ name: string }>;
-}
-
-interface ScheduleResponse {
-	dates?: Record<string, ScheduleCourtDay[]>;
-}
 
 // --- Config from env ---
 const HOME_LAT = parseFloat(process.env.HOME_LAT || "");

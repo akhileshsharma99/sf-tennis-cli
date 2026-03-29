@@ -4,7 +4,7 @@ import { distanceMiles } from "./geo";
 
 // --- API response types ---
 
-interface RecUsLocationCourt {
+export interface RecUsLocationCourt {
 	courtNumber: string;
 	maxReservationTime?: string;
 	defaultReservationWindowDays?: number;
@@ -12,14 +12,14 @@ interface RecUsLocationCourt {
 	sports?: Array<{ name: string }>;
 }
 
-interface RecUsLocation {
+export interface RecUsLocation {
 	lat: string;
 	lng: string;
 	formattedAddress: string;
 	courts?: RecUsLocationCourt[];
 }
 
-interface RecUsLocationResponse {
+export interface RecUsLocationResponse {
 	location?: RecUsLocation;
 	lat?: string;
 	lng?: string;
@@ -27,17 +27,17 @@ interface RecUsLocationResponse {
 	courts?: RecUsLocationCourt[];
 }
 
-interface ScheduleEntry {
+export interface ScheduleEntry {
 	referenceType: string;
 }
 
-interface ScheduleCourtDay {
+export interface ScheduleCourtDay {
 	courtNumber: string;
 	schedule: Record<string, ScheduleEntry>;
 	sports?: Array<{ name: string }>;
 }
 
-interface ScheduleResponse {
+export interface ScheduleResponse {
 	dates?: Record<string, ScheduleCourtDay[]>;
 }
 
@@ -276,16 +276,21 @@ export async function fetchAllCourts({
 	timeRange,
 }: FetchAllCourtsOptions): Promise<FetchAllCourtsResult> {
 	const courts = await getCourts();
-	const results = await Promise.all(
-		courts.map((court) =>
-			fetchCourtData(court, date, refLat, refLng).catch(
-				(): CourtLocationError => ({
-					...court,
-					error: "fetch failed",
-				}),
+	const results: (CourtLocationResult | CourtLocationError)[] = [];
+	for (let i = 0; i < courts.length; i += 5) {
+		const batch = courts.slice(i, i + 5);
+		const batchResults = await Promise.all(
+			batch.map((court) =>
+				fetchCourtData(court, date, refLat, refLng).catch(
+					(): CourtLocationError => ({
+						...court,
+						error: "fetch failed",
+					}),
+				),
 			),
-		),
-	);
+		);
+		results.push(...batchResults);
+	}
 
 	const errors = results.filter((r) => !isCourtLocationResult(r));
 	let filtered = results.filter(isCourtLocationResult);
