@@ -77,8 +77,7 @@ async function notify({ title, body, tags, priority, click, idempotencyKey }) {
     headers,
     body,
   });
-  const status = res.ok ? 'sent' : `failed (${res.status})`;
-  console.log(`  [${status}] ${title}: ${body}`);
+  if (!res.ok) console.warn(`  [failed] ${res.status}`);
 }
 
 // --- Core logic ---
@@ -128,13 +127,12 @@ async function checkCourt(court, dates) {
 
       const dateLabel = formatDateShort(date);
       const timesStr = matchingSlots.map((s) => `${s.start}-${s.end}`).join(', ');
-      const distStr = `${dist} mi`;
 
       if (windowOpeningSoon) {
         const minsLeft = Math.round(minsUntilOpen);
         notifications.push({
           title: `${court.name} opens in ${minsLeft} min!`,
-          body: `${c.courtNumber}: ${timesStr} on ${dateLabel} (${distStr})`,
+          body: `${c.courtNumber}: ${timesStr} on ${dateLabel}`,
           tags: 'alarm_clock,tennis',
           priority: 'urgent',
           click: `https://www.rec.us/${court.slug}`,
@@ -144,7 +142,7 @@ async function checkCourt(court, dates) {
         for (const slot of matchingSlots) {
           notifications.push({
             title: `${court.name} - ${dateLabel}`,
-            body: `${c.courtNumber}: ${slot.start}-${slot.end} available (${distStr})`,
+            body: `${c.courtNumber}: ${slot.start}-${slot.end} available`,
             tags: 'tennis',
             priority: 'default',
             click: `https://www.rec.us/${court.slug}`,
@@ -165,8 +163,7 @@ async function main() {
     return;
   }
   const courts = await getCourts();
-  console.log(`Checking ${courts.length} locations for ${dates.map(formatDateShort).join(', ')}...`);
-  console.log(`Preferences: ${PREF_START}:00-${PREF_END}:00, within ${MAX_DISTANCE} mi\n`);
+  console.log(`Checking ${courts.length} locations...`);
 
   const notifications = [];
 
@@ -186,7 +183,7 @@ async function main() {
     return;
   }
 
-  console.log(`\nSending ${notifications.length} notification(s)...`);
+  console.log(`Sending ${notifications.length} notification(s)...`);
   await Promise.all(notifications.map(notify));
   console.log('Done.');
 }
