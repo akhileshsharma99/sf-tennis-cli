@@ -5,7 +5,7 @@
 
 process.env.TZ = 'America/Los_Angeles';
 
-import { COURTS } from './src/courts.js';
+import { getCourts } from './src/courts.js';
 import { distanceMiles } from './src/geo.js';
 import {
   resolveLocationId, fetchJson, parseHour,
@@ -164,13 +164,14 @@ async function main() {
     console.log('No target dates in the next 10 days.');
     return;
   }
-  console.log(`Checking ${COURTS.length} locations for ${dates.map(formatDateShort).join(', ')}...`);
+  const courts = await getCourts();
+  console.log(`Checking ${courts.length} locations for ${dates.map(formatDateShort).join(', ')}...`);
   console.log(`Preferences: ${PREF_START}:00-${PREF_END}:00, within ${MAX_DISTANCE} mi\n`);
 
   const notifications = [];
 
-  for (let i = 0; i < COURTS.length; i += 5) {
-    const batch = COURTS.slice(i, i + 5);
+  for (let i = 0; i < courts.length; i += 5) {
+    const batch = courts.slice(i, i + 5);
     const results = await Promise.all(
       batch.map((c) => checkCourt(c, dates).catch((e) => {
         console.warn(`  [error] ${c.name}: ${e.message}`);

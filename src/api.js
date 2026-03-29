@@ -1,4 +1,4 @@
-import { COURTS } from './courts.js';
+import { getCourts } from './courts.js';
 import { distanceMiles } from './geo.js';
 
 const HEADERS = {
@@ -134,8 +134,9 @@ async function fetchCourtData(court, date, refLat, refLng) {
 }
 
 export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRange }) {
+  const courts = await getCourts();
   const results = await Promise.all(
-    COURTS.map((court) =>
+    courts.map((court) =>
       fetchCourtData(court, date, refLat, refLng).catch(() => ({ ...court, error: 'fetch failed' }))
     )
   );
