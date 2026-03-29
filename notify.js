@@ -5,6 +5,7 @@
 
 process.env.TZ = "America/Los_Angeles";
 
+import { resolve } from "node:path";
 import {
 	buildCourtMeta,
 	computeReleaseDate,
@@ -15,6 +16,7 @@ import {
 	resolveLocationId,
 } from "./src/api.js";
 import { getCourts } from "./src/courts.js";
+import { readJson, writeJson } from "./src/fs-utils.js";
 import { distanceMiles } from "./src/geo.js";
 
 // --- Config from env ---
@@ -77,6 +79,20 @@ function getTargetDates() {
 		}
 	}
 	return dates;
+}
+
+// --- Local dedup cache (24 h TTL) ---
+const DEDUP_FILE = resolve(import.meta.dirname, ".cache", "notified.json");
+const DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
+
+function loadDedupCache() {
+	const raw = readJson(DEDUP_FILE, {});
+	const now = Date.now();
+	const cleaned = {};
+	for (const [key, ts] of Object.entries(raw)) {
+		if (now - ts < DEDUP_TTL_MS) cleaned[key] = ts;
+	}
+	return cleaned;
 }
 
 // --- ntfy ---
@@ -159,8 +175,8 @@ async function checkCourt(court, dates) {
 			if (windowOpeningSoon) {
 				const minsLeft = Math.round(minsUntilOpen);
 				notifications.push({
-					title: `${court.name} opens in ${minsLeft} min!`,
-					body: `${c.courtNumber}: ${timesStr} on ${dateLabel}`,
+					title: `${dateLabel} - ${court.name} opens in ${minsLeft} min!`,
+					body: `${c.courtNumber}: ${timesStr}`,
 					tags: "alarm_clock,tennis",
 					priority: "urgent",
 					click: `https://www.rec.us/${court.slug}`,
@@ -169,7 +185,7 @@ async function checkCourt(court, dates) {
 			} else if (windowOpen) {
 				for (const slot of matchingSlots) {
 					notifications.push({
-						title: `${court.name} - ${dateLabel}`,
+						title: `${dateLabel} - ${court.name}`,
 						body: `${c.courtNumber}: ${slot.start}-${slot.end} available`,
 						tags: "tennis",
 						priority: "default",
@@ -208,13 +224,24 @@ async function main() {
 		notifications.push(...results.flat());
 	}
 
-	if (notifications.length === 0) {
-		console.log("No notifications to send.");
+	const dedupCache = loadDedupCache();
+	const fresh = notifications.filter((n) => !dedupCache[n.idempotencyKey]);
+
+	if (fresh.length === 0) {
+		console.log("No new notifications to send.");
+		writeJson(DEDUP_FILE, dedupCache);
 		return;
 	}
 
-	console.log(`Sending ${notifications.length} notification(s)...`);
-	await Promise.all(notifications.map(notify));
+	console.log(
+		`Sending ${fresh.length} notification(s) (${notifications.length - fresh.length} deduped)...`,
+	);
+	await Promise.all(fresh.map(notify));
+
+	const now = Date.now();
+	for (const n of fresh) dedupCache[n.idempotencyKey] = now;
+	writeJson(DEDUP_FILE, dedupCache);
+
 	console.log("Done.");
 }
 
