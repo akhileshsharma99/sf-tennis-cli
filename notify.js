@@ -96,18 +96,15 @@ function loadDedupCache() {
 }
 
 // --- ntfy ---
-async function notify({ title, body, tags, priority, click, idempotencyKey }) {
-	const headers = {
-		Title: title,
-		Tags: tags,
-		Priority: priority || "default",
-		Click: click,
-	};
-	if (idempotencyKey) headers["X-Idempotency-Key"] = idempotencyKey;
-
+async function notify({ title, body, tags, priority, click }) {
 	const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
 		method: "POST",
-		headers,
+		headers: {
+			Title: title,
+			Tags: tags,
+			Priority: priority || "default",
+			Click: click,
+		},
 		body,
 	});
 	if (!res.ok) console.warn(`  [failed] ${res.status}`);
@@ -180,19 +177,20 @@ async function checkCourt(court, dates) {
 					tags: "alarm_clock,tennis",
 					priority: "urgent",
 					click: `https://www.rec.us/${court.slug}`,
-					idempotencyKey: `${court.slug}:${c.courtNumber}:${date}:window`,
+					_dedupKey: `${court.slug}:${c.courtNumber}:${date}:window`,
 				});
 			} else if (windowOpen) {
-				for (const slot of matchingSlots) {
-					notifications.push({
-						title: `${dateLabel} - ${court.name}`,
-						body: `${c.courtNumber}: ${slot.start}-${slot.end} available`,
-						tags: "tennis",
-						priority: "default",
-						click: `https://www.rec.us/${court.slug}`,
-						idempotencyKey: `${court.slug}:${c.courtNumber}:${date}:${slot.start}`,
-					});
-				}
+				notifications.push({
+					title: `${dateLabel} - ${court.name}`,
+					body: `${c.courtNumber}: ${timesStr}`,
+					tags: "tennis",
+					priority: "default",
+					click: `https://www.rec.us/${court.slug}`,
+					_groupKey: `${date}:${court.slug}`,
+					_slotKeys: matchingSlots.map(
+						(s) => `${court.slug}:${c.courtNumber}:${date}:${s.start}`,
+					),
+				});
 			}
 		}
 	}
@@ -224,8 +222,12 @@ async function main() {
 		notifications.push(...results.flat());
 	}
 
+	const dedupKeys = (n) => n._slotKeys || [n._dedupKey];
+
 	const dedupCache = loadDedupCache();
-	const fresh = notifications.filter((n) => !dedupCache[n.idempotencyKey]);
+	const fresh = notifications.filter((n) =>
+		dedupKeys(n).some((k) => !dedupCache[k]),
+	);
 
 	if (fresh.length === 0) {
 		console.log("No new notifications to send.");
@@ -233,13 +235,44 @@ async function main() {
 		return;
 	}
 
+	// Group default-priority notifications by day+location
+	const urgent = fresh.filter((n) => !n._groupKey);
+	const groups = new Map();
+	for (const n of fresh) {
+		if (!n._groupKey) continue;
+		if (!groups.has(n._groupKey)) {
+			groups.set(n._groupKey, {
+				title: n.title,
+				tags: n.tags,
+				priority: n.priority,
+				click: n.click,
+				lines: [n.body],
+			});
+		} else {
+			groups.get(n._groupKey).lines.push(n.body);
+		}
+	}
+
+	const toSend = [
+		...urgent,
+		...[...groups.values()].map((g) => ({
+			title: g.title,
+			body: g.lines.join("\n"),
+			tags: g.tags,
+			priority: g.priority,
+			click: g.click,
+		})),
+	];
+
 	console.log(
-		`Sending ${fresh.length} notification(s) (${notifications.length - fresh.length} deduped)...`,
+		`Sending ${toSend.length} notification(s) (${notifications.length - fresh.length} deduped)...`,
 	);
-	await Promise.all(fresh.map(notify));
+	await Promise.all(toSend.map(notify));
 
 	const now = Date.now();
-	for (const n of fresh) dedupCache[n.idempotencyKey] = now;
+	for (const n of fresh) {
+		for (const k of dedupKeys(n)) dedupCache[k] = now;
+	}
 	writeJson(DEDUP_FILE, dedupCache);
 
 	console.log("Done.");
