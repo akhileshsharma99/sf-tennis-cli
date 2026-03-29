@@ -1,6 +1,6 @@
 # SF Rec & Park Tennis Availability CLI
 
-CLI to find available tennis court times across all 27 SF Rec & Park courts. Fetches real-time availability from [rec.us](https://www.rec.us) and sorts by distance from your location.
+CLI to find available tennis court times across all 27 SF Rec & Park courts. Fetches real-time availability from [rec.us](https://www.rec.us) and sorts by distance from your location. Optionally, get push notifications via [ntfy.sh](https://ntfy.sh) when courts matching your day/time/distance preferences open up — runs on GitHub Actions every 15 minutes.
 
 ## Setup
 
@@ -61,12 +61,17 @@ Get push notifications when courts matching your preferences become available, p
 
 1. Install the [ntfy app](https://ntfy.sh) on your phone
 2. Pick a random topic name and subscribe to it in the app
-3. Set GitHub Actions secrets (Settings > Secrets and variables > Actions):
+3. Set secrets as GitHub Actions secrets (Settings > Secrets and variables > Actions) and/or in a local `.env` file (see `.env.example`):
 
 ```bash
+# GitHub Actions
 gh secret set HOME_LAT      # your latitude
 gh secret set HOME_LNG      # your longitude
 gh secret set NTFY_TOPIC    # your ntfy topic name
+
+# Local testing
+cp .env.example .env         # then fill in values
+bun notify.js                # run locally
 ```
 
 4. Optionally set variables for preferences (or use defaults):
@@ -87,8 +92,8 @@ gh workflow run notify.yml
 ### How it works
 
 - **Window opening alerts** (urgent): Notifies when a court's booking window opens within the next 20 minutes, so you can race to book
-- **Available slot alerts**: Notifies when open slots match your day/time/distance preferences (catches cancellations)
-- Deduplication via ntfy's idempotency key — each slot only notifies once
+- **Available slot alerts**: Notifies when open slots match your day/time/distance preferences (catches cancellations), batched by day and location
+- Deduplication via local cache (24h TTL) — each slot only notifies once
 
 ## Data Source
 

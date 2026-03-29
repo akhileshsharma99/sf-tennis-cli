@@ -5,6 +5,7 @@
 
 process.env.TZ = "America/Los_Angeles";
 
+import { resolve } from "node:path";
 import {
 	buildCourtMeta,
 	computeReleaseDate,
@@ -15,6 +16,7 @@ import {
 	resolveLocationId,
 } from "./src/api.js";
 import { getCourts } from "./src/courts.js";
+import { readJson, writeJson } from "./src/fs-utils.js";
 import { distanceMiles } from "./src/geo.js";
 
 // --- Config from env ---
@@ -79,19 +81,30 @@ function getTargetDates() {
 	return dates;
 }
 
-// --- ntfy ---
-async function notify({ title, body, tags, priority, click, idempotencyKey }) {
-	const headers = {
-		Title: title,
-		Tags: tags,
-		Priority: priority || "default",
-		Click: click,
-	};
-	if (idempotencyKey) headers["X-Idempotency-Key"] = idempotencyKey;
+// --- Local dedup cache (24 h TTL) ---
+const DEDUP_FILE = resolve(import.meta.dirname, ".cache", "notified.json");
+const DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
 
+function loadDedupCache() {
+	const raw = readJson(DEDUP_FILE, {});
+	const now = Date.now();
+	const cleaned = {};
+	for (const [key, ts] of Object.entries(raw)) {
+		if (now - ts < DEDUP_TTL_MS) cleaned[key] = ts;
+	}
+	return cleaned;
+}
+
+// --- ntfy ---
+async function notify({ title, body, tags, priority, click }) {
 	const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
 		method: "POST",
-		headers,
+		headers: {
+			Title: title,
+			Tags: tags,
+			Priority: priority || "default",
+			Click: click,
+		},
 		body,
 	});
 	if (!res.ok) console.warn(`  [failed] ${res.status}`);
@@ -159,24 +172,25 @@ async function checkCourt(court, dates) {
 			if (windowOpeningSoon) {
 				const minsLeft = Math.round(minsUntilOpen);
 				notifications.push({
-					title: `${court.name} opens in ${minsLeft} min!`,
-					body: `${c.courtNumber}: ${timesStr} on ${dateLabel}`,
+					title: `${dateLabel} - ${court.name} opens in ${minsLeft} min!`,
+					body: `${c.courtNumber}: ${timesStr}`,
 					tags: "alarm_clock,tennis",
 					priority: "urgent",
 					click: `https://www.rec.us/${court.slug}`,
-					idempotencyKey: `${court.slug}:${c.courtNumber}:${date}:window`,
+					_dedupKey: `${court.slug}:${c.courtNumber}:${date}:window`,
 				});
 			} else if (windowOpen) {
-				for (const slot of matchingSlots) {
-					notifications.push({
-						title: `${court.name} - ${dateLabel}`,
-						body: `${c.courtNumber}: ${slot.start}-${slot.end} available`,
-						tags: "tennis",
-						priority: "default",
-						click: `https://www.rec.us/${court.slug}`,
-						idempotencyKey: `${court.slug}:${c.courtNumber}:${date}:${slot.start}`,
-					});
-				}
+				notifications.push({
+					title: `${dateLabel} - ${court.name}`,
+					body: `${c.courtNumber}: ${timesStr}`,
+					tags: "tennis",
+					priority: "default",
+					click: `https://www.rec.us/${court.slug}`,
+					_groupKey: `${date}:${court.slug}`,
+					_slotKeys: matchingSlots.map(
+						(s) => `${court.slug}:${c.courtNumber}:${date}:${s.start}`,
+					),
+				});
 			}
 		}
 	}
@@ -208,13 +222,59 @@ async function main() {
 		notifications.push(...results.flat());
 	}
 
-	if (notifications.length === 0) {
-		console.log("No notifications to send.");
+	const dedupKeys = (n) => n._slotKeys || [n._dedupKey];
+
+	const dedupCache = loadDedupCache();
+	const fresh = notifications.filter((n) =>
+		dedupKeys(n).some((k) => !dedupCache[k]),
+	);
+
+	if (fresh.length === 0) {
+		console.log("No new notifications to send.");
+		writeJson(DEDUP_FILE, dedupCache);
 		return;
 	}
 
-	console.log(`Sending ${notifications.length} notification(s)...`);
-	await Promise.all(notifications.map(notify));
+	// Group default-priority notifications by day+location
+	const urgent = fresh.filter((n) => !n._groupKey);
+	const groups = new Map();
+	for (const n of fresh) {
+		if (!n._groupKey) continue;
+		if (!groups.has(n._groupKey)) {
+			groups.set(n._groupKey, {
+				title: n.title,
+				tags: n.tags,
+				priority: n.priority,
+				click: n.click,
+				lines: [n.body],
+			});
+		} else {
+			groups.get(n._groupKey).lines.push(n.body);
+		}
+	}
+
+	const toSend = [
+		...urgent,
+		...[...groups.values()].map((g) => ({
+			title: g.title,
+			body: g.lines.join("\n"),
+			tags: g.tags,
+			priority: g.priority,
+			click: g.click,
+		})),
+	];
+
+	console.log(
+		`Sending ${toSend.length} notification(s) (${notifications.length - fresh.length} deduped)...`,
+	);
+	await Promise.all(toSend.map(notify));
+
+	const now = Date.now();
+	for (const n of fresh) {
+		for (const k of dedupKeys(n)) dedupCache[k] = now;
+	}
+	writeJson(DEDUP_FILE, dedupCache);
+
 	console.log("Done.");
 }
 
