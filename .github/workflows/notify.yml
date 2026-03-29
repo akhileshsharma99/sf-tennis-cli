@@ -1,0 +1,23 @@
+name: Tennis Court Notifications
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun notify.js
+        env:
+          TZ: America/Los_Angeles
+          HOME_LAT: ${{ secrets.HOME_LAT }}
+          HOME_LNG: ${{ secrets.HOME_LNG }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          MAX_DISTANCE: ${{ vars.MAX_DISTANCE }}
+          PREF_DAYS: ${{ vars.PREF_DAYS }}
+          PREF_START_HOUR: ${{ vars.PREF_START_HOUR }}
+          PREF_END_HOUR: ${{ vars.PREF_END_HOUR }}
