@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/akhileshsharma99/sf-tennis-cli/compare/v1.0.0...v1.1.0) (2026-03-29)
+
+
+### Features
+
+* migrate to TypeScript with compiled binary releases ([#4](https://github.com/akhileshsharma99/sf-tennis-cli/issues/4)) ([734288f](https://github.com/akhileshsharma99/sf-tennis-cli/commit/734288f756d3da9684094164b05a1d8af51cf095))
+
+
+### Bug Fixes
+
+* add local dedup cache and reorder notification titles ([#2](https://github.com/akhileshsharma99/sf-tennis-cli/issues/2)) ([d790bb1](https://github.com/akhileshsharma99/sf-tennis-cli/commit/d790bb1b27c4c5812d97bc3ed380ce50b550e1bb))
+
 ## 1.0.0 (2026-03-29)
 
 
