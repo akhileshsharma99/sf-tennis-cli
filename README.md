@@ -7,18 +7,10 @@ CLI to find available tennis court times across all 27 SF Rec & Park courts. Fet
 ### Pre-built binary (no dependencies)
 
 ```bash
-# macOS (Apple Silicon)
-curl -fSL https://github.com/akhileshsharma99/sf-tennis-cli/releases/latest/download/tennis-darwin-arm64 -o tennis
-chmod +x tennis && sudo mv tennis /usr/local/bin/
-
-# macOS (Intel)
-curl -fSL https://github.com/akhileshsharma99/sf-tennis-cli/releases/latest/download/tennis-darwin-x64 -o tennis
-chmod +x tennis && sudo mv tennis /usr/local/bin/
-
-# Linux (x64)
-curl -fSL https://github.com/akhileshsharma99/sf-tennis-cli/releases/latest/download/tennis-linux-x64 -o tennis
-chmod +x tennis && sudo mv tennis /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/akhileshsharma99/sf-tennis-cli/main/install.sh | bash
 ```
+
+Detects your OS/arch automatically. Run again to update.
 
 ### From source (requires [Bun](https://bun.sh))
 
