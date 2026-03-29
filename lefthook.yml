@@ -1,0 +1,8 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint
+      run: bunx biome check {staged_files}
+      glob: "*.{js,json}"
+    - name: unused exports
+      run: bunx knip
