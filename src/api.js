@@ -1,21 +1,21 @@
 import { COURTS } from './courts.js';
 import { distanceMiles } from './geo.js';
 
-export { COURTS, distanceMiles };
-
-export const HEADERS = {
+const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
   'Origin': 'https://www.rec.us',
   'Referer': 'https://www.rec.us/',
   'Accept': 'application/json',
 };
 
-// Resolve a court slug to its rec.us locationId by scraping the HTML
+const _locationIdCache = new Map();
 export async function resolveLocationId(slug) {
+  if (_locationIdCache.has(slug)) return _locationIdCache.get(slug);
   const res = await fetch(`https://www.rec.us/${slug}`, { headers: HEADERS });
   const html = await res.text();
-  const match = html.match(/"locationId":"([^"]+)"/);
-  return match?.[1] ?? null;
+  const id = html.match(/"locationId":"([^"]+)"/)?.[1] ?? null;
+  if (id) _locationIdCache.set(slug, id);
+  return id;
 }
 
 export async function fetchJson(url) {
@@ -25,7 +25,43 @@ export async function fetchJson(url) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
-// Fetch location details + schedule for a single court
+// --- Shared helpers used by both CLI and notify ---
+
+export const DEFAULT_COURT_META = { slotDuration: 60, windowDays: 7, releaseTime: '00:00:00' };
+
+export function buildCourtMeta(locationCourts) {
+  const meta = {};
+  for (const c of locationCourts ?? []) {
+    meta[c.courtNumber] = {
+      slotDuration: parseMinutes(c.maxReservationTime),
+      windowDays: c.defaultReservationWindowDays ?? 7,
+      releaseTime: c.reservationReleaseTimeLocal ?? '00:00:00',
+    };
+  }
+  return meta;
+}
+
+export function computeReleaseDate(dateStr, meta) {
+  const releaseDate = new Date(dateStr + 'T00:00:00');
+  releaseDate.setDate(releaseDate.getDate() - meta.windowDays);
+  const [rh, rm] = meta.releaseTime.split(':').map(Number);
+  releaseDate.setHours(rh, rm, 0, 0);
+  return releaseDate;
+}
+
+export function parseReservableSlots(schedule, slotDuration) {
+  const slots = [];
+  for (const [range, info] of Object.entries(schedule ?? {})) {
+    const [start, end] = range.split(',').map((s) => s.trim());
+    if (info.referenceType === 'RESERVABLE') {
+      slots.push(...splitIntoSlots(start, end, slotDuration));
+    }
+  }
+  return slots;
+}
+
+// --- CLI data fetching ---
+
 async function fetchCourtData(court, date, refLat, refLng) {
   const locationId = await resolveLocationId(court.slug);
   if (!locationId) {
@@ -46,43 +82,22 @@ async function fetchCourtData(court, date, refLat, refLng) {
   const lat = parseFloat(loc.lat);
   const lng = parseFloat(loc.lng);
   const dist = Math.round(distanceMiles(refLat, refLng, lat, lng) * 100) / 100;
-
-  // Build a map of court number -> slot duration + reservation window from location data
-  const courtMeta = {};
-  for (const c of loc.courts ?? []) {
-    courtMeta[c.courtNumber] = {
-      slotDuration: parseMinutes(c.maxReservationTime),
-      windowDays: c.defaultReservationWindowDays ?? 7,
-      releaseTime: c.reservationReleaseTimeLocal ?? '00:00:00',
-    };
-  }
+  const courtMeta = buildCourtMeta(loc.courts);
 
   const todayCourts = schedRes.dates?.[dateKey] ?? [];
   const now = new Date();
   const courts = todayCourts.map((c) => {
-    const meta = courtMeta[c.courtNumber] || { slotDuration: 60, windowDays: 7, releaseTime: '00:00:00' };
-
-    // Check if the reservation window has opened for this court on the requested date
-    const requestedDate = new Date(date + 'T00:00:00');
-    const releaseDate = new Date(requestedDate);
-    releaseDate.setDate(releaseDate.getDate() - meta.windowDays);
-    const [rh, rm] = meta.releaseTime.split(':').map(Number);
-    releaseDate.setHours(rh, rm, 0, 0);
+    const meta = courtMeta[c.courtNumber] || DEFAULT_COURT_META;
+    const releaseDate = computeReleaseDate(date, meta);
     const windowOpen = now >= releaseDate;
 
-    const available = [];
-    const pendingSlots = [];
+    const reservable = parseReservableSlots(c.schedule, meta.slotDuration);
+    const available = windowOpen ? reservable : [];
+    const pendingSlots = windowOpen ? [] : reservable;
     const booked = [];
     for (const [range, info] of Object.entries(c.schedule ?? {})) {
-      const [start, end] = range.split(',').map((s) => s.trim());
-      if (info.referenceType === 'RESERVABLE') {
-        const slots = splitIntoSlots(start, end, meta.slotDuration);
-        if (windowOpen) {
-          available.push(...slots);
-        } else {
-          pendingSlots.push(...slots);
-        }
-      } else if (info.referenceType === 'RESERVATION') {
+      if (info.referenceType === 'RESERVATION') {
+        const [start, end] = range.split(',').map((s) => s.trim());
         booked.push({ start, end });
       }
     }
@@ -96,7 +111,6 @@ async function fetchCourtData(court, date, refLat, refLng) {
     };
   });
 
-  // Find the earliest opensAt across all courts at this location
   const opensAtDates = courts.map((c) => c.opensAt).filter(Boolean);
   const earliestOpensAt = opensAtDates.length > 0
     ? new Date(Math.min(...opensAtDates.map((d) => d.getTime())))
@@ -119,7 +133,6 @@ async function fetchCourtData(court, date, refLat, refLng) {
   };
 }
 
-// Fetch all courts, sorted by distance
 export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRange }) {
   const results = await Promise.all(
     COURTS.map((court) =>
@@ -168,33 +181,28 @@ export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRa
   return { courts: filtered, errors: errors.length };
 }
 
-// Parse "18:00" -> 18
 export function parseHour(time) {
   const m = time?.match(/^(\d{1,2}):/);
   return m ? parseInt(m[1], 10) : null;
 }
 
-// Parse "01:30:00" -> 90 (minutes)
 export function parseMinutes(duration) {
   if (!duration) return 60;
   const [h, m] = duration.split(':').map(Number);
   return h * 60 + m;
 }
 
-// Convert "HH:MM" to total minutes from midnight
 function timeToMinutes(time) {
   const [h, m] = time.split(':').map(Number);
   return h * 60 + m;
 }
 
-// Convert total minutes to "HH:MM"
 function minutesToTime(mins) {
   const h = String(Math.floor(mins / 60)).padStart(2, '0');
   const m = String(mins % 60).padStart(2, '0');
   return `${h}:${m}`;
 }
 
-// Split a RESERVABLE range into individual bookable slots
 export function splitIntoSlots(start, end, durationMins) {
   const startMins = timeToMinutes(start);
   const endMins = timeToMinutes(end);

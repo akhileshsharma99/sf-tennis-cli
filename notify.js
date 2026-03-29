@@ -5,10 +5,12 @@
 
 process.env.TZ = 'America/Los_Angeles';
 
+import { COURTS } from './src/courts.js';
+import { distanceMiles } from './src/geo.js';
 import {
-  COURTS, distanceMiles,
-  resolveLocationId, fetchJson,
-  parseMinutes, parseHour, splitIntoSlots,
+  resolveLocationId, fetchJson, parseHour,
+  buildCourtMeta, computeReleaseDate, parseReservableSlots,
+  DEFAULT_COURT_META,
 } from './src/api.js';
 
 // --- Config from env ---
@@ -95,45 +97,33 @@ async function checkCourt(court, dates) {
   const dist = Math.round(distanceMiles(HOME_LAT, HOME_LNG, lat, lng) * 100) / 100;
   if (dist > MAX_DISTANCE) return notifications;
 
-  const courtMeta = {};
-  for (const c of loc.courts ?? []) {
-    courtMeta[c.courtNumber] = {
-      slotDuration: parseMinutes(c.maxReservationTime),
-      windowDays: c.defaultReservationWindowDays ?? 7,
-      releaseTime: c.reservationReleaseTimeLocal ?? '00:00:00',
-    };
-  }
+  const courtMeta = buildCourtMeta(loc.courts);
 
   const now = new Date();
 
-  for (const date of dates) {
-    const dateKey = date.replace(/-/g, '');
-    const schedRes = await fetchJson(`https://api.rec.us/v1/locations/${locationId}/schedule?startDate=${date}`);
+  // Fetch all dates in parallel — they are independent requests for the same location
+  const schedResults = await Promise.all(
+    dates.map(async (date) => {
+      const schedRes = await fetchJson(`https://api.rec.us/v1/locations/${locationId}/schedule?startDate=${date}`);
+      return { date, schedRes };
+    })
+  );
+
+  for (const { date, schedRes } of schedResults) {
     if (!schedRes) continue;
+    const dateKey = date.replace(/-/g, '');
+    const requestedDate = new Date(date + 'T00:00:00');
 
     const dayCourts = schedRes.dates?.[dateKey] ?? [];
     for (const c of dayCourts) {
-      const meta = courtMeta[c.courtNumber] || { slotDuration: 60, windowDays: 7, releaseTime: '00:00:00' };
-
-      const requestedDate = new Date(date + 'T00:00:00');
-      const releaseDate = new Date(requestedDate);
-      releaseDate.setDate(releaseDate.getDate() - meta.windowDays);
-      const [rh, rm] = meta.releaseTime.split(':').map(Number);
-      releaseDate.setHours(rh, rm, 0, 0);
+      const meta = courtMeta[c.courtNumber] || DEFAULT_COURT_META;
+      const releaseDate = computeReleaseDate(date, meta);
 
       const windowOpen = now >= releaseDate;
       const minsUntilOpen = (releaseDate.getTime() - now.getTime()) / 60000;
       const windowOpeningSoon = !windowOpen && minsUntilOpen > 0 && minsUntilOpen <= WINDOW_ALERT_MINS;
 
-      const slots = [];
-      for (const [range, info] of Object.entries(c.schedule ?? {})) {
-        const [start, end] = range.split(',').map((s) => s.trim());
-        if (info.referenceType === 'RESERVABLE') {
-          slots.push(...splitIntoSlots(start, end, meta.slotDuration));
-        }
-      }
-
-      const matchingSlots = slots.filter(slotOverlaps);
+      const matchingSlots = parseReservableSlots(c.schedule, meta.slotDuration).filter(slotOverlaps);
       if (matchingSlots.length === 0) continue;
 
       const dateLabel = formatDateShort(date);
