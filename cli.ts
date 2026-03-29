@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { program } from "commander";
 import dayjs from "dayjs";
+import pkg from "./package.json";
 import { fetchAllCourts } from "./src/api";
+import { formatDateLabel } from "./src/format";
+import type { Coords } from "./src/geo";
 import { getCurrentLocation } from "./src/geo";
 import {
 	addLocation,
@@ -25,14 +25,9 @@ interface CliOptions {
 	json?: boolean;
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const { version } = JSON.parse(
-	readFileSync(resolve(__dirname, "package.json"), "utf8"),
-) as { version: string };
-
 program
 	.name("tennis")
-	.version(version)
+	.version(pkg.version)
 	.description("Find available SF tennis court times near you")
 	.option(
 		"-d, --date <date>",
@@ -53,9 +48,7 @@ program
 			? parseDate(opts.date)
 			: dayjs().format("YYYY-MM-DD");
 
-		// Resolve reference location
-		let refLat: number;
-		let refLng: number;
+		let ref: Coords;
 		let refLabel: string;
 		const locStr = opts.location?.toLowerCase();
 
@@ -68,8 +61,7 @@ program
 				);
 				process.exit(1);
 			}
-			refLat = def.lat;
-			refLng = def.lng;
+			ref = { lat: def.lat, lng: def.lng };
 			refLabel = `${def.name} (${def.address})`;
 		} else if (locStr === "current") {
 			process.stdout.write(chalk.dim("Getting current location... "));
@@ -78,8 +70,7 @@ program
 				console.error(chalk.red("Could not determine current location"));
 				process.exit(1);
 			}
-			refLat = loc.lat;
-			refLng = loc.lng;
+			ref = { lat: loc.lat, lng: loc.lng };
 			refLabel = loc.label;
 			console.log(chalk.dim(refLabel));
 		} else if (
@@ -87,8 +78,7 @@ program
 			locStr.split(",").every((s) => !Number.isNaN(parseFloat(s)))
 		) {
 			const [lat, lng] = locStr.split(",").map(Number);
-			refLat = lat;
-			refLng = lng;
+			ref = { lat, lng };
 			refLabel = `${lat}, ${lng}`;
 		} else {
 			const loc = await getLocation(locStr);
@@ -100,12 +90,10 @@ program
 				console.error(chalk.dim("Or use: -l current, -l lat,lng"));
 				process.exit(1);
 			}
-			refLat = loc.lat;
-			refLng = loc.lng;
+			ref = { lat: loc.lat, lng: loc.lng };
 			refLabel = `${loc.name} (${loc.address})`;
 		}
 
-		// Parse time range
 		let timeRange: [number, number] | null = null;
 		if (opts.range) {
 			const parts = opts.range.split("-").map(Number);
@@ -138,8 +126,7 @@ program
 		process.stdout.write(chalk.dim("Fetching court data..."));
 		const { courts: results, errors } = await fetchAllCourts({
 			date,
-			refLat,
-			refLng,
+			ref,
 			maxDistance: opts.maxDistance,
 			timeRange,
 		});
@@ -199,7 +186,6 @@ program
 		);
 	});
 
-// --- Subcommand: manage locations ---
 const loc = program.command("location").description("Manage saved locations");
 
 loc
@@ -311,29 +297,12 @@ function formatHour(h: number): string {
 }
 
 function formatOpensAt(date: Date): string {
-	const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-	const months = [
-		"Jan",
-		"Feb",
-		"Mar",
-		"Apr",
-		"May",
-		"Jun",
-		"Jul",
-		"Aug",
-		"Sep",
-		"Oct",
-		"Nov",
-		"Dec",
-	];
-	const day = days[date.getDay()];
-	const month = months[date.getMonth()];
-	const d = date.getDate();
+	const label = formatDateLabel(date);
 	const h = date.getHours();
 	const m = date.getMinutes();
 	const timeStr =
 		formatHour(h) + (m > 0 ? `:${String(m).padStart(2, "0")}` : "");
-	return `${day} ${month} ${d} at ${timeStr}`;
+	return `${label} at ${timeStr}`;
 }
 
 program.parse();

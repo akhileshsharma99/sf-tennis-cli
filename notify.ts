@@ -6,32 +6,27 @@
 process.env.TZ = "America/Los_Angeles";
 
 import { resolve } from "node:path";
-import type {
-	RecUsLocationResponse,
-	ScheduleResponse,
-	TimeSlot,
-} from "./src/api";
+import type { ScheduleResponse, TimeSlot } from "./src/api";
 import {
-	buildCourtMeta,
 	computeReleaseDate,
 	DEFAULT_COURT_META,
 	fetchJson,
+	fetchLocationData,
 	parseHour,
 	parseReservableSlots,
-	resolveLocationId,
+	scheduleUrl,
 } from "./src/api";
 import type { Court } from "./src/courts";
 import { getCourts } from "./src/courts";
+import { formatDateLabel } from "./src/format";
 import { readJson, writeJson } from "./src/fs-utils";
 import { distanceMiles } from "./src/geo";
-
-// --- Types ---
 
 interface NotifyParams {
 	title: string;
 	body: string;
 	tags: string;
-	priority?: string;
+	priority?: "urgent" | "high" | "default" | "low" | "min";
 	click: string;
 }
 
@@ -51,9 +46,9 @@ interface GroupedNotification {
 
 type DedupCache = Record<string, number>;
 
-// --- Config from env ---
 const HOME_LAT = parseFloat(process.env.HOME_LAT || "");
 const HOME_LNG = parseFloat(process.env.HOME_LNG || "");
+const HOME = { lat: HOME_LAT, lng: HOME_LNG };
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
 const MAX_DISTANCE = parseFloat(process.env.MAX_DISTANCE || "2");
 const PREF_DAYS = (process.env.PREF_DAYS || "2,4").split(",").map(Number); // 0=Sun, 2=Tue, 4=Thu
@@ -66,7 +61,6 @@ if (!HOME_LAT || !HOME_LNG || !NTFY_TOPIC) {
 	process.exit(1);
 }
 
-// --- Helpers ---
 function slotOverlaps(slot: TimeSlot): boolean {
 	const s = parseHour(slot.start);
 	const e = parseHour(slot.end);
@@ -81,23 +75,7 @@ function formatDate(d: Date): string {
 }
 
 function formatDateShort(dateStr: string): string {
-	const d = new Date(`${dateStr}T12:00:00`);
-	const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-	const months = [
-		"Jan",
-		"Feb",
-		"Mar",
-		"Apr",
-		"May",
-		"Jun",
-		"Jul",
-		"Aug",
-		"Sep",
-		"Oct",
-		"Nov",
-		"Dec",
-	];
-	return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+	return formatDateLabel(new Date(`${dateStr}T12:00:00`));
 }
 
 function getTargetDates(): string[] {
@@ -113,7 +91,6 @@ function getTargetDates(): string[] {
 	return dates;
 }
 
-// --- Local dedup cache (24 h TTL) ---
 const DEDUP_FILE = resolve(
 	import.meta.dirname ?? ".",
 	".cache",
@@ -131,7 +108,6 @@ function loadDedupCache(): DedupCache {
 	return cleaned;
 }
 
-// --- ntfy ---
 async function notify({
 	title,
 	body,
@@ -152,37 +128,24 @@ async function notify({
 	if (!res.ok) console.warn(`  [failed] ${res.status}`);
 }
 
-// --- Core logic ---
 async function checkCourt(
 	court: Court,
 	dates: string[],
 ): Promise<SlotNotification[]> {
 	const notifications: SlotNotification[] = [];
 
-	const locationId = await resolveLocationId(court.slug);
-	if (!locationId) return notifications;
+	const locData = await fetchLocationData(court.slug);
+	if (!locData) return notifications;
 
-	const locRes = await fetchJson<RecUsLocationResponse>(
-		`https://api.rec.us/v1/locations/${locationId}?publishedSites=true`,
-	);
-	if (!locRes) return notifications;
-
-	const loc = locRes.location ?? locRes;
-	const lat = parseFloat(loc.lat ?? "");
-	const lng = parseFloat(loc.lng ?? "");
-	const dist =
-		Math.round(distanceMiles(HOME_LAT, HOME_LNG, lat, lng) * 100) / 100;
+	const dist = distanceMiles(HOME, locData);
 	if (dist > MAX_DISTANCE) return notifications;
-
-	const courtMeta = buildCourtMeta(loc.courts);
 
 	const now = new Date();
 
-	// Fetch all dates in parallel — they are independent requests for the same location
 	const schedResults = await Promise.all(
 		dates.map(async (date) => {
 			const schedRes = await fetchJson<ScheduleResponse>(
-				`https://api.rec.us/v1/locations/${locationId}/schedule?startDate=${date}`,
+				scheduleUrl(locData.locationId, date),
 			);
 			return { date, schedRes };
 		}),
@@ -194,7 +157,7 @@ async function checkCourt(
 
 		const dayCourts = schedRes.dates?.[dateKey] ?? [];
 		for (const c of dayCourts) {
-			const meta = courtMeta[c.courtNumber] || DEFAULT_COURT_META;
+			const meta = locData.courtMeta[c.courtNumber] || DEFAULT_COURT_META;
 			const releaseDate = computeReleaseDate(date, meta);
 
 			const windowOpen = now >= releaseDate;
@@ -212,6 +175,7 @@ async function checkCourt(
 			const timesStr = matchingSlots
 				.map((s) => `${s.start}-${s.end}`)
 				.join(", ");
+			const courtUrl = `https://www.rec.us/${court.slug}`;
 
 			if (windowOpeningSoon) {
 				const minsLeft = Math.round(minsUntilOpen);
@@ -220,7 +184,7 @@ async function checkCourt(
 					body: `${c.courtNumber}: ${timesStr}`,
 					tags: "alarm_clock,tennis",
 					priority: "urgent",
-					click: `https://www.rec.us/${court.slug}`,
+					click: courtUrl,
 					_dedupKey: `${court.slug}:${c.courtNumber}:${date}:window`,
 				});
 			} else if (windowOpen) {
@@ -229,7 +193,7 @@ async function checkCourt(
 					body: `${c.courtNumber}: ${timesStr}`,
 					tags: "tennis",
 					priority: "default",
-					click: `https://www.rec.us/${court.slug}`,
+					click: courtUrl,
 					_groupKey: `${date}:${court.slug}`,
 					_slotKeys: matchingSlots.map(
 						(s) => `${court.slug}:${c.courtNumber}:${date}:${s.start}`,
@@ -280,7 +244,6 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	// Group default-priority notifications by day+location
 	const urgent = fresh.filter((n) => !n._groupKey);
 	const groups = new Map<string, GroupedNotification>();
 	for (const n of fresh) {
@@ -304,7 +267,7 @@ async function main(): Promise<void> {
 			title: g.title,
 			body: g.lines.join("\n"),
 			tags: g.tags,
-			priority: g.priority,
+			priority: g.priority as NotifyParams["priority"],
 			click: g.click,
 		})),
 	];

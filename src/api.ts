@@ -1,8 +1,10 @@
 import type { Court } from "./courts";
 import { getCourts } from "./courts";
+import type { Coords } from "./geo";
 import { distanceMiles } from "./geo";
 
-// --- API response types ---
+const API_BASE = "https://api.rec.us/v1/locations";
+const REC_US_BASE = "https://www.rec.us";
 
 export interface RecUsLocationCourt {
 	courtNumber: string;
@@ -27,8 +29,10 @@ export interface RecUsLocationResponse {
 	courts?: RecUsLocationCourt[];
 }
 
+type ReferenceType = "RESERVABLE" | "RESERVATION";
+
 export interface ScheduleEntry {
-	referenceType: string;
+	referenceType: ReferenceType;
 }
 
 export interface ScheduleCourtDay {
@@ -40,8 +44,6 @@ export interface ScheduleCourtDay {
 export interface ScheduleResponse {
 	dates?: Record<string, ScheduleCourtDay[]>;
 }
-
-// --- Exported types ---
 
 export interface CourtMeta {
 	slotDuration: number;
@@ -86,8 +88,7 @@ interface CourtLocationError {
 
 interface FetchAllCourtsOptions {
 	date: string;
-	refLat: number;
-	refLng: number;
+	ref: Coords;
 	maxDistance?: number;
 	timeRange?: [number, number] | null;
 }
@@ -97,13 +98,17 @@ interface FetchAllCourtsResult {
 	errors: number;
 }
 
-// --- Implementation ---
+export interface LocationData extends Coords {
+	locationId: string;
+	address: string;
+	courtMeta: Record<string, CourtMeta>;
+}
 
 const HEADERS: Record<string, string> = {
 	"User-Agent":
 		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-	Origin: "https://www.rec.us",
-	Referer: "https://www.rec.us/",
+	Origin: REC_US_BASE,
+	Referer: `${REC_US_BASE}/`,
 	Accept: "application/json",
 };
 
@@ -111,7 +116,7 @@ const _locationIdCache = new Map<string, string>();
 export async function resolveLocationId(slug: string): Promise<string | null> {
 	const cached = _locationIdCache.get(slug);
 	if (cached) return cached;
-	const res = await fetch(`https://www.rec.us/${slug}`, { headers: HEADERS });
+	const res = await fetch(`${REC_US_BASE}/${slug}`, { headers: HEADERS });
 	const html = await res.text();
 	const id = html.match(/"locationId":"([^"]+)"/)?.[1] ?? null;
 	if (id) _locationIdCache.set(slug, id);
@@ -121,15 +126,38 @@ export async function resolveLocationId(slug: string): Promise<string | null> {
 export async function fetchJson<T = unknown>(url: string): Promise<T | null> {
 	const res = await fetch(url, { headers: HEADERS });
 	if (!res.ok) return null;
-	const text = await res.text();
 	try {
-		return JSON.parse(text) as T;
+		return (await res.json()) as T;
 	} catch {
 		return null;
 	}
 }
 
-// --- Shared helpers used by both CLI and notify ---
+export function scheduleUrl(locationId: string, date: string): string {
+	return `${API_BASE}/${locationId}/schedule?startDate=${date}`;
+}
+
+export async function fetchLocationData(
+	slug: string,
+): Promise<LocationData | null> {
+	const locationId = await resolveLocationId(slug);
+	if (!locationId) return null;
+
+	const locRes = await fetchJson<RecUsLocationResponse>(
+		`${API_BASE}/${locationId}?publishedSites=true`,
+	);
+	if (!locRes) return null;
+
+	const loc: RecUsLocation =
+		locRes.location ?? (locRes as unknown as RecUsLocation);
+	return {
+		locationId,
+		lat: parseFloat(loc.lat),
+		lng: parseFloat(loc.lng),
+		address: loc.formattedAddress,
+		courtMeta: buildCourtMeta(loc.courts),
+	};
+}
 
 export const DEFAULT_COURT_META: CourtMeta = {
 	slotDuration: 60,
@@ -173,44 +201,30 @@ export function parseReservableSlots(
 	return slots;
 }
 
-// --- CLI data fetching ---
-
 async function fetchCourtData(
 	court: Court,
 	date: string,
-	refLat: number,
-	refLng: number,
+	ref: Coords,
 ): Promise<CourtLocationResult | CourtLocationError> {
-	const locationId = await resolveLocationId(court.slug);
-	if (!locationId) {
-		return { ...court, error: "Could not resolve locationId" };
+	const locData = await fetchLocationData(court.slug);
+	if (!locData) {
+		return { ...court, error: "Could not resolve location" };
 	}
 
-	const dateKey = date.replace(/-/g, "");
-	const [locRes, schedRes] = await Promise.all([
-		fetchJson<RecUsLocationResponse>(
-			`https://api.rec.us/v1/locations/${locationId}?publishedSites=true`,
-		),
-		fetchJson<ScheduleResponse>(
-			`https://api.rec.us/v1/locations/${locationId}/schedule?startDate=${date}`,
-		),
-	]);
+	const dist = distanceMiles(ref, locData);
 
-	if (!locRes || !schedRes) {
+	const schedRes = await fetchJson<ScheduleResponse>(
+		scheduleUrl(locData.locationId, date),
+	);
+	if (!schedRes) {
 		return { ...court, error: "API request failed" };
 	}
 
-	const loc: RecUsLocation =
-		locRes.location ?? (locRes as unknown as RecUsLocation);
-	const lat = parseFloat(loc.lat);
-	const lng = parseFloat(loc.lng);
-	const dist = Math.round(distanceMiles(refLat, refLng, lat, lng) * 100) / 100;
-	const courtMeta = buildCourtMeta(loc.courts);
-
+	const dateKey = date.replace(/-/g, "");
 	const todayCourts = schedRes.dates?.[dateKey] ?? [];
 	const now = new Date();
 	const courts: CourtResult[] = todayCourts.map((c) => {
-		const meta = courtMeta[c.courtNumber] || DEFAULT_COURT_META;
+		const meta = locData.courtMeta[c.courtNumber] || DEFAULT_COURT_META;
 		const releaseDate = computeReleaseDate(date, meta);
 		const windowOpen = now >= releaseDate;
 
@@ -249,12 +263,12 @@ async function fetchCourtData(
 	return {
 		name: court.name,
 		slug: court.slug,
-		locationId,
-		address: loc.formattedAddress,
-		lat,
-		lng,
+		locationId: locData.locationId,
+		address: locData.address,
+		lat: locData.lat,
+		lng: locData.lng,
 		distance: dist,
-		url: `https://www.rec.us/${court.slug}`,
+		url: `${REC_US_BASE}/${court.slug}`,
 		courts,
 		totalAvailableSlots: courts.reduce((n, c) => n + c.available.length, 0),
 		totalPendingSlots,
@@ -270,8 +284,7 @@ function isCourtLocationResult(
 
 export async function fetchAllCourts({
 	date,
-	refLat,
-	refLng,
+	ref,
 	maxDistance,
 	timeRange,
 }: FetchAllCourtsOptions): Promise<FetchAllCourtsResult> {
@@ -281,7 +294,7 @@ export async function fetchAllCourts({
 		const batch = courts.slice(i, i + 5);
 		const batchResults = await Promise.all(
 			batch.map((court) =>
-				fetchCourtData(court, date, refLat, refLng).catch(
+				fetchCourtData(court, date, ref).catch(
 					(): CourtLocationError => ({
 						...court,
 						error: "fetch failed",
@@ -295,12 +308,10 @@ export async function fetchAllCourts({
 	const errors = results.filter((r) => !isCourtLocationResult(r));
 	let filtered = results.filter(isCourtLocationResult);
 
-	// Filter by max distance
 	if (maxDistance != null) {
 		filtered = filtered.filter((r) => r.distance <= maxDistance);
 	}
 
-	// Filter by time range (overlap check)
 	if (timeRange) {
 		const [startHour, endHour] = timeRange;
 		const timeFilter = (slot: TimeSlot): boolean => {
@@ -331,13 +342,11 @@ export async function fetchAllCourts({
 				opensAt: totalPendingSlots > 0 ? r.opensAt : null,
 			};
 		});
-		// Remove locations with no availability AND no pending slots in the time range
 		filtered = filtered.filter(
 			(r) => r.totalAvailableSlots > 0 || r.totalPendingSlots > 0,
 		);
 	}
 
-	// Sort by distance
 	filtered.sort((a, b) => a.distance - b.distance);
 
 	return { courts: filtered, errors: errors.length };
