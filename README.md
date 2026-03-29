@@ -1,4 +1,4 @@
-# sf-tennis-cli
+# SF Rec & Park Tennis Availability CLI
 
 CLI to find available tennis court times across all 27 SF Rec & Park courts. Fetches real-time availability from [rec.us](https://www.rec.us) and sorts by distance from your location.
 
