@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { program } from "commander";
 import dayjs from "dayjs";
@@ -14,9 +17,14 @@ import {
 	setDefaultLocation,
 } from "./src/locations.js";
 
-// --- Main command: find courts ---
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const { version } = JSON.parse(
+	readFileSync(resolve(__dirname, "package.json"), "utf8"),
+);
+
 program
 	.name("tennis")
+	.version(version)
 	.description("Find available SF tennis court times near you")
 	.option(
 		"-d, --date <date>",
