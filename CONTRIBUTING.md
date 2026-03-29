@@ -14,7 +14,7 @@ bun link  # makes `tennis` available globally
 ├── notify.js           GitHub Actions notification script
 ├── src/
 │   ├── api.js          rec.us API client + shared helpers
-│   ├── courts.js       List of all 27 SF Rec & Park courts
+│   ├── courts.js       Court list (fetched from sfrecpark.org, with fallback)
 │   ├── geo.js          Haversine distance + geocoding
 │   └── locations.js    Saved location management
 ├── .github/workflows/
@@ -22,15 +22,9 @@ bun link  # makes `tennis` available globally
 └── locations.json      User's saved locations (gitignored)
 ```
 
-## Adding a Court
+## Court List
 
-If SF Rec & Park adds a new reservable court, add it to `src/courts.js`:
-
-```js
-{ slug: 'newcourt', name: 'New Court Name' },
-```
-
-The slug is the path on rec.us (e.g., `rec.us/newcourt`).
+The court list is fetched dynamically from [sfrecpark.org](https://sfrecpark.org/1446/Reservable-Tennis-Courts) at runtime. If the fetch fails, a hardcoded fallback in `src/courts.js` is used. New courts added by SF Rec & Park are picked up automatically.
 
 ## How the API Works
 

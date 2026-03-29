@@ -1,6 +1,5 @@
 const SFRECPARK_URL = 'https://sfrecpark.org/1446/Reservable-Tennis-Courts';
 
-// Fallback if sfrecpark.org is unreachable
 const FALLBACK_COURTS = [
   { slug: 'alicemarble',     name: 'Alice Marble' },
   { slug: 'balboa',          name: 'Balboa Park' },
@@ -35,17 +34,15 @@ let _cached = null;
 
 async function fetchCourtsFromSFRecPark() {
   const res = await fetch(SFRECPARK_URL);
+  if (!res.ok) return null;
   const html = await res.text();
 
-  // Extract rec.us links and deduplicate by slug
   const seen = new Map();
-  const regex = /href="https?:\/\/(?:www\.)?rec\.us\/([a-z]+)"[^>]*>([^<]+)</gi;
+  const regex = /href="https?:\/\/(?:www\.)?rec\.us\/([a-z0-9-]+)"[^>]*>([^<]+)/gi;
   for (const match of html.matchAll(regex)) {
     const slug = match[1].toLowerCase();
     if (seen.has(slug)) continue;
-    // Derive location name: "Alice Marble Tennis Court #1" → "Alice Marble"
-    const rawName = match[2].trim();
-    const name = rawName.replace(/\s*Tennis\s*Court.*$/i, '').trim();
+    const name = match[2].trim().replace(/\s*Tennis\s*Court.*$/i, '').trim();
     seen.set(slug, { slug, name });
   }
 
@@ -57,10 +54,9 @@ export async function getCourts() {
   if (_cached) return _cached;
   try {
     _cached = await fetchCourtsFromSFRecPark();
-  } catch {}
+  } catch (err) {
+    console.warn(`Failed to fetch courts from sfrecpark.org: ${err.message}`);
+  }
   if (!_cached) _cached = FALLBACK_COURTS;
   return _cached;
 }
-
-// Synchronous access for callers that don't need fresh data
-export const COURTS = FALLBACK_COURTS;
