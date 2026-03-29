@@ -38,7 +38,7 @@ tennis --json                   # raw JSON output
 tennis location list            # show all saved locations
 tennis location add <name> "<address>"
 tennis location remove <name>
-tennis location default <name>  # set default locationok 
+tennis location default <name>  # set default location
 ```
 
 ### Options
@@ -52,6 +52,43 @@ tennis location default <name>  # set default locationok
 | `-m, --max-distance <miles>` | Max distance in miles                                             |
 | `--json`                     | Output raw JSON                                                   |
 
+
+## Notifications
+
+Get push notifications when courts matching your preferences become available, powered by GitHub Actions and [ntfy.sh](https://ntfy.sh).
+
+### Setup
+
+1. Install the [ntfy app](https://ntfy.sh) on your phone
+2. Pick a random topic name and subscribe to it in the app
+3. Set GitHub Actions secrets (Settings > Secrets and variables > Actions):
+
+```bash
+gh secret set HOME_LAT      # your latitude
+gh secret set HOME_LNG      # your longitude
+gh secret set NTFY_TOPIC    # your ntfy topic name
+```
+
+4. Optionally set variables for preferences (or use defaults):
+
+| Variable | Default | Description |
+|---|---|---|
+| `MAX_DISTANCE` | `2` | Miles radius from home |
+| `PREF_DAYS` | `2,4` | Days of week (0=Sun, 1=Mon, 2=Tue, ..., 6=Sat) |
+| `PREF_START_HOUR` | `17` | Start of preferred time window (24h) |
+| `PREF_END_HOUR` | `19` | End of preferred time window (24h) |
+
+5. The workflow runs every 15 minutes automatically. Test with:
+
+```bash
+gh workflow run notify.yml
+```
+
+### How it works
+
+- **Window opening alerts** (urgent): Notifies when a court's booking window opens within the next 20 minutes, so you can race to book
+- **Available slot alerts**: Notifies when open slots match your day/time/distance preferences (catches cancellations)
+- Deduplication via ntfy's idempotency key — each slot only notifies once
 
 ## Data Source
 
