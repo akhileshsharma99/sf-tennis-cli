@@ -3,9 +3,9 @@
 import { program } from 'commander';
 import chalk from 'chalk';
 import dayjs from 'dayjs';
-import { fetchAllCourts } from './api.js';
-import { getLocation, getDefaultLocation, addLocation, removeLocation, listLocations, setDefaultLocation } from './locations.js';
-import { getCurrentLocation } from './geo.js';
+import { fetchAllCourts } from './src/api.js';
+import { getLocation, getDefaultLocation, addLocation, removeLocation, listLocations, setDefaultLocation } from './src/locations.js';
+import { getCurrentLocation } from './src/geo.js';
 
 // --- Main command: find courts ---
 program

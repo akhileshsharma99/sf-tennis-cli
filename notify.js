@@ -1,9 +1,15 @@
 #!/usr/bin/env bun
 
-// Self-contained notification script for GitHub Actions.
-// Zero npm dependencies — just needs Bun.
+// Notification script for GitHub Actions.
+// Imports shared code from src/ — zero extra npm dependencies.
 
 process.env.TZ = 'America/Los_Angeles';
+
+import {
+  COURTS, distanceMiles,
+  resolveLocationId, fetchJson,
+  parseMinutes, parseHour, splitIntoSlots,
+} from './src/api.js';
 
 // --- Config from env ---
 const HOME_LAT = parseFloat(process.env.HOME_LAT);
@@ -20,107 +26,13 @@ if (!HOME_LAT || !HOME_LNG || !NTFY_TOPIC) {
   process.exit(1);
 }
 
-// --- Inline courts list ---
-const COURTS = [
-  { slug: 'alicemarble',     name: 'Alice Marble' },
-  { slug: 'balboa',          name: 'Balboa Park' },
-  { slug: 'buenavista',      name: 'Buena Vista' },
-  { slug: 'crockeramazon',   name: 'Crocker Amazon' },
-  { slug: 'dolores',         name: 'Dolores Park' },
-  { slug: 'dupont',          name: 'DuPont' },
-  { slug: 'fulton',          name: 'Fulton Playground' },
-  { slug: 'glencanyon',      name: 'Glen Park' },
-  { slug: 'hamilton',        name: 'Hamilton' },
-  { slug: 'jpmurphy',        name: 'J.P. Murphy' },
-  { slug: 'jackson',         name: 'Jackson Playground' },
-  { slug: 'joedimaggio',     name: 'Joe DiMaggio' },
-  { slug: 'lafayette',       name: 'Lafayette Park' },
-  { slug: 'mclaren',         name: 'McLaren Park' },
-  { slug: 'minnielovieward', name: 'Minnie & Lovie' },
-  { slug: 'miraloma',        name: 'Miraloma Park' },
-  { slug: 'moscone',         name: 'Moscone' },
-  { slug: 'mountainlake',    name: 'Mountain Lake Park' },
-  { slug: 'parkside',        name: 'Parkside Square' },
-  { slug: 'potrerohill',     name: 'Potrero Hill' },
-  { slug: 'presidiowall',    name: 'Presidio Wall' },
-  { slug: 'richmond',        name: 'Richmond Playground' },
-  { slug: 'rossi',           name: 'Rossi Park' },
-  { slug: 'stmarys',         name: "St. Mary's" },
-  { slug: 'sterngrove',      name: 'Stern Grove' },
-  { slug: 'sunset',          name: 'Sunset Rec' },
-  { slug: 'uppernoe',        name: 'Upper Noe' },
-];
-
-// --- Inline helpers ---
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-  'Origin': 'https://www.rec.us',
-  'Referer': 'https://www.rec.us/',
-  'Accept': 'application/json',
-};
-
-const toRad = (d) => (d * Math.PI) / 180;
-function distanceMiles(lat1, lng1, lat2, lng2) {
-  const R = 3958.8;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-async function resolveLocationId(slug) {
-  const res = await fetch(`https://www.rec.us/${slug}`, { headers: HEADERS });
-  const html = await res.text();
-  const match = html.match(/"locationId":"([^"]+)"/);
-  return match?.[1] ?? null;
-}
-
-async function fetchJson(url) {
-  const res = await fetch(url, { headers: HEADERS });
-  if (!res.ok) return null;
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return null; }
-}
-
-function parseMinutes(duration) {
-  if (!duration) return 60;
-  const [h, m] = duration.split(':').map(Number);
-  return h * 60 + m;
-}
-
-function timeToMinutes(time) {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
-}
-
-function minutesToTime(mins) {
-  const h = String(Math.floor(mins / 60)).padStart(2, '0');
-  const m = String(mins % 60).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
-function splitIntoSlots(start, end, durationMins) {
-  const startMins = timeToMinutes(start);
-  const endMins = timeToMinutes(end);
-  const slots = [];
-  for (let t = startMins; t + durationMins <= endMins; t += durationMins) {
-    slots.push({ start: minutesToTime(t), end: minutesToTime(t + durationMins) });
-  }
-  return slots;
-}
-
-function parseHour(time) {
-  const m = time?.match(/^(\d{1,2}):/);
-  return m ? parseInt(m[1], 10) : null;
-}
-
+// --- Helpers ---
 function slotOverlaps(slot) {
   const s = parseHour(slot.start);
   const e = parseHour(slot.end);
   return s != null && e != null && s < PREF_END && e > PREF_START;
 }
 
-// --- Date helpers ---
 function formatDate(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -229,7 +141,6 @@ async function checkCourt(court, dates) {
       const distStr = `${dist} mi`;
 
       if (windowOpeningSoon) {
-        // Type 1: Window opening alert
         const minsLeft = Math.round(minsUntilOpen);
         notifications.push({
           title: `${court.name} opens in ${minsLeft} min!`,
@@ -240,7 +151,6 @@ async function checkCourt(court, dates) {
           idempotencyKey: `${court.slug}:${c.courtNumber}:${date}:window`,
         });
       } else if (windowOpen) {
-        // Type 2: Available slot alert
         for (const slot of matchingSlots) {
           notifications.push({
             title: `${court.name} - ${dateLabel}`,
@@ -265,11 +175,10 @@ async function main() {
     return;
   }
   console.log(`Checking ${COURTS.length} locations for ${dates.map(formatDateShort).join(', ')}...`);
-  console.log(`Preferences: ${PREF_START}:00–${PREF_END}:00, within ${MAX_DISTANCE} mi\n`);
+  console.log(`Preferences: ${PREF_START}:00-${PREF_END}:00, within ${MAX_DISTANCE} mi\n`);
 
   const notifications = [];
 
-  // Process courts in batches of 5 to avoid hammering the API
   for (let i = 0; i < COURTS.length; i += 5) {
     const batch = COURTS.slice(i, i + 5);
     const results = await Promise.all(

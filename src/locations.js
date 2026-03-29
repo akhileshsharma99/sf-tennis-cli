@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { geocode } from './geo.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOCATIONS_FILE = resolve(__dirname, 'locations.json');
+const LOCATIONS_FILE = resolve(__dirname, '..', 'locations.json');
 
 function readLocationsFile() {
   try {

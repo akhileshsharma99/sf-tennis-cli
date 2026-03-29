@@ -1,7 +1,9 @@
 import { COURTS } from './courts.js';
 import { distanceMiles } from './geo.js';
 
-const HEADERS = {
+export { COURTS, distanceMiles };
+
+export const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
   'Origin': 'https://www.rec.us',
   'Referer': 'https://www.rec.us/',
@@ -9,14 +11,14 @@ const HEADERS = {
 };
 
 // Resolve a court slug to its rec.us locationId by scraping the HTML
-async function resolveLocationId(slug) {
+export async function resolveLocationId(slug) {
   const res = await fetch(`https://www.rec.us/${slug}`, { headers: HEADERS });
   const html = await res.text();
   const match = html.match(/"locationId":"([^"]+)"/);
   return match?.[1] ?? null;
 }
 
-async function fetchJson(url) {
+export async function fetchJson(url) {
   const res = await fetch(url, { headers: HEADERS });
   if (!res.ok) return null;
   const text = await res.text();
@@ -167,13 +169,13 @@ export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRa
 }
 
 // Parse "18:00" -> 18
-function parseHour(time) {
+export function parseHour(time) {
   const m = time?.match(/^(\d{1,2}):/);
   return m ? parseInt(m[1], 10) : null;
 }
 
 // Parse "01:30:00" -> 90 (minutes)
-function parseMinutes(duration) {
+export function parseMinutes(duration) {
   if (!duration) return 60;
   const [h, m] = duration.split(':').map(Number);
   return h * 60 + m;
@@ -193,7 +195,7 @@ function minutesToTime(mins) {
 }
 
 // Split a RESERVABLE range into individual bookable slots
-function splitIntoSlots(start, end, durationMins) {
+export function splitIntoSlots(start, end, durationMins) {
   const startMins = timeToMinutes(start);
   const endMins = timeToMinutes(end);
   const slots = [];
