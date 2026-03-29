@@ -1,24 +1,19 @@
-import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { geocode } from './geo.js';
+import { readJson, writeJson } from './fs-utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCATIONS_FILE = resolve(__dirname, '..', 'locations.json');
 
 function readLocationsFile() {
-  try {
-    return JSON.parse(readFileSync(LOCATIONS_FILE, 'utf8'));
-  } catch {
-    return [];
-  }
+  return readJson(LOCATIONS_FILE, []);
 }
 
 function writeLocationsFile(locations) {
-  writeFileSync(LOCATIONS_FILE, JSON.stringify(locations, null, 2) + '\n');
+  writeJson(LOCATIONS_FILE, locations, { pretty: true });
 }
 
-// Load all locations, geocoding any that haven't been resolved yet
 export async function loadLocations({ quiet = false } = {}) {
   const locations = readLocationsFile();
   let changed = false;
@@ -41,13 +36,11 @@ export async function loadLocations({ quiet = false } = {}) {
   return locations;
 }
 
-// Get a location by name (case-insensitive)
 export async function getLocation(name) {
   const locations = await loadLocations();
   return locations.find((l) => l.name.toLowerCase() === name.toLowerCase()) ?? null;
 }
 
-// Add a new named location
 export async function addLocation(name, address) {
   const locations = readLocationsFile();
   const existing = locations.findIndex((l) => l.name.toLowerCase() === name.toLowerCase());
@@ -68,7 +61,6 @@ export async function addLocation(name, address) {
   return loc;
 }
 
-// Remove a named location
 export function removeLocation(name) {
   const locations = readLocationsFile();
   const idx = locations.findIndex((l) => l.name.toLowerCase() === name.toLowerCase());
@@ -78,13 +70,11 @@ export function removeLocation(name) {
   return true;
 }
 
-// Get the default location (the one with "default": true, or the first one)
 export function getDefaultLocation() {
   const locations = readLocationsFile();
   return locations.find((l) => l.default) ?? locations[0] ?? null;
 }
 
-// Set a location as the default
 export function setDefaultLocation(name) {
   const locations = readLocationsFile();
   const idx = locations.findIndex((l) => l.name.toLowerCase() === name.toLowerCase());
@@ -95,7 +85,6 @@ export function setDefaultLocation(name) {
   return true;
 }
 
-// List all saved locations
 export function listLocations() {
   return readLocationsFile();
 }

@@ -1,30 +1,30 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { readJson, writeJson } from './fs-utils.js';
 
 const SFRECPARK_URL = 'https://sfrecpark.org/1446/Reservable-Tennis-Courts';
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CACHE_DIR = resolve(__dirname, '..', '.cache');
-const CACHE_FILE = resolve(CACHE_DIR, 'courts.json');
+const CACHE_FILE = resolve(__dirname, '..', '.cache', 'courts.json');
 
 let _courts = null;
 let _inflight = null;
 
 function readCache() {
-  try {
-    const { ts, courts } = JSON.parse(readFileSync(CACHE_FILE, 'utf8'));
-    if (Date.now() - ts < CACHE_MAX_AGE_MS && courts?.length > 0) return courts;
-  } catch {}
+  const data = readJson(CACHE_FILE);
+  if (data && Date.now() - data.ts < CACHE_MAX_AGE_MS && data.courts?.length > 0) {
+    return data.courts;
+  }
   return null;
 }
 
 function writeCache(courts) {
   try {
-    mkdirSync(CACHE_DIR, { recursive: true });
-    writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), courts }) + '\n');
-  } catch {}
+    writeJson(CACHE_FILE, { ts: Date.now(), courts });
+  } catch (err) {
+    console.warn(`[cache] Failed to write ${CACHE_FILE}: ${err.message}`);
+  }
 }
 
 async function fetchCourtsFromSFRecPark() {
