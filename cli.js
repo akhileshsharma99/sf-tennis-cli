@@ -115,9 +115,16 @@ program
       console.log(chalk.dim(`  ${r.address} · ${r.url}`));
 
       for (const court of r.courts) {
-        if (court.available.length === 0) continue;
-        const times = court.available.map((s) => chalk.green(`${s.start}–${s.end}`)).join(', ');
-        console.log(`  ${court.courtNumber}: ${times}`);
+        if (court.available.length === 0 && court.pendingSlots.length === 0) continue;
+        if (court.available.length > 0) {
+          const times = court.available.map((s) => chalk.green(`${s.start}–${s.end}`)).join(', ');
+          console.log(`  ${court.courtNumber}: ${times}`);
+        }
+        if (court.pendingSlots.length > 0 && court.opensAt) {
+          const opensStr = formatOpensAt(court.opensAt);
+          const pendingTimes = court.pendingSlots.map((s) => `${s.start}–${s.end}`).join(', ');
+          console.log(chalk.yellow(`  ${court.courtNumber}: ${pendingTimes} (opens ${opensStr})`));
+        }
       }
       console.log();
     }
@@ -209,6 +216,18 @@ function formatHour(h) {
   if (h === 0 || h === 24) return '12am';
   if (h === 12) return '12pm';
   return h < 12 ? `${h}am` : `${h - 12}pm`;
+}
+
+function formatOpensAt(date) {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const day = days[date.getDay()];
+  const month = months[date.getMonth()];
+  const d = date.getDate();
+  const h = date.getHours();
+  const m = date.getMinutes();
+  const timeStr = formatHour(h) + (m > 0 ? `:${String(m).padStart(2, '0')}` : '');
+  return `${day} ${month} ${d} at ${timeStr}`;
 }
 
 program.parse();

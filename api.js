@@ -45,27 +45,61 @@ async function fetchCourtData(court, date, refLat, refLng) {
   const lng = parseFloat(loc.lng);
   const dist = Math.round(distanceMiles(refLat, refLng, lat, lng) * 100) / 100;
 
-  // Build a map of court number -> slot duration from location data
+  // Build a map of court number -> slot duration + reservation window from location data
   const courtMeta = {};
   for (const c of loc.courts ?? []) {
-    courtMeta[c.courtNumber] = parseMinutes(c.maxReservationTime);
+    courtMeta[c.courtNumber] = {
+      slotDuration: parseMinutes(c.maxReservationTime),
+      windowDays: c.defaultReservationWindowDays ?? 7,
+      releaseTime: c.reservationReleaseTimeLocal ?? '00:00:00',
+    };
   }
 
   const todayCourts = schedRes.dates?.[dateKey] ?? [];
+  const now = new Date();
   const courts = todayCourts.map((c) => {
-    const slotDuration = courtMeta[c.courtNumber] || 60;
+    const meta = courtMeta[c.courtNumber] || { slotDuration: 60, windowDays: 7, releaseTime: '00:00:00' };
+
+    // Check if the reservation window has opened for this court on the requested date
+    const requestedDate = new Date(date + 'T00:00:00');
+    const releaseDate = new Date(requestedDate);
+    releaseDate.setDate(releaseDate.getDate() - meta.windowDays);
+    const [rh, rm] = meta.releaseTime.split(':').map(Number);
+    releaseDate.setHours(rh, rm, 0, 0);
+    const windowOpen = now >= releaseDate;
+
     const available = [];
+    const pendingSlots = [];
     const booked = [];
     for (const [range, info] of Object.entries(c.schedule ?? {})) {
       const [start, end] = range.split(',').map((s) => s.trim());
       if (info.referenceType === 'RESERVABLE') {
-        available.push(...splitIntoSlots(start, end, slotDuration));
+        const slots = splitIntoSlots(start, end, meta.slotDuration);
+        if (windowOpen) {
+          available.push(...slots);
+        } else {
+          pendingSlots.push(...slots);
+        }
       } else if (info.referenceType === 'RESERVATION') {
         booked.push({ start, end });
       }
     }
-    return { courtNumber: c.courtNumber, sports: c.sports?.map((s) => s.name), available, booked };
+    return {
+      courtNumber: c.courtNumber,
+      sports: c.sports?.map((s) => s.name),
+      available,
+      booked,
+      pendingSlots,
+      opensAt: !windowOpen && pendingSlots.length > 0 ? releaseDate : null,
+    };
   });
+
+  // Find the earliest opensAt across all courts at this location
+  const opensAtDates = courts.map((c) => c.opensAt).filter(Boolean);
+  const earliestOpensAt = opensAtDates.length > 0
+    ? new Date(Math.min(...opensAtDates.map((d) => d.getTime())))
+    : null;
+  const totalPendingSlots = courts.reduce((n, c) => n + c.pendingSlots.length, 0);
 
   return {
     name: court.name,
@@ -78,6 +112,8 @@ async function fetchCourtData(court, date, refLat, refLng) {
     url: `https://www.rec.us/${court.slug}`,
     courts,
     totalAvailableSlots: courts.reduce((n, c) => n + c.available.length, 0),
+    totalPendingSlots,
+    opensAt: earliestOpensAt,
   };
 }
 
@@ -100,23 +136,28 @@ export async function fetchAllCourts({ date, refLat, refLng, maxDistance, timeRa
   // Filter by time range (overlap check)
   if (timeRange) {
     const [startHour, endHour] = timeRange;
+    const timeFilter = (slot) => {
+      const slotStart = parseHour(slot.start);
+      const slotEnd = parseHour(slot.end);
+      return slotStart != null && slotEnd != null && slotStart < endHour && slotEnd > startHour;
+    };
     filtered = filtered.map((r) => {
       const courts = r.courts.map((c) => ({
         ...c,
-        available: c.available.filter((slot) => {
-          const slotStart = parseHour(slot.start);
-          const slotEnd = parseHour(slot.end);
-          return slotStart != null && slotEnd != null && slotStart < endHour && slotEnd > startHour;
-        }),
+        available: c.available.filter(timeFilter),
+        pendingSlots: c.pendingSlots.filter(timeFilter),
       }));
+      const totalPendingSlots = courts.reduce((n, c) => n + c.pendingSlots.length, 0);
       return {
         ...r,
         courts,
         totalAvailableSlots: courts.reduce((n, c) => n + c.available.length, 0),
+        totalPendingSlots,
+        opensAt: totalPendingSlots > 0 ? r.opensAt : null,
       };
     });
-    // Remove courts with no availability in the time range
-    filtered = filtered.filter((r) => r.totalAvailableSlots > 0);
+    // Remove locations with no availability AND no pending slots in the time range
+    filtered = filtered.filter((r) => r.totalAvailableSlots > 0 || r.totalPendingSlots > 0);
   }
 
   // Sort by distance
