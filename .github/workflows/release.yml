@@ -9,9 +9,39 @@ permissions:
   pull-requests: write
 
 jobs:
-  release:
+  release-please:
     runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           release-type: node
+
+  build:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+
+      - name: Build binaries
+        run: |
+          bun build ./cli.ts --compile --target=bun-linux-x64 --outfile tennis-linux-x64
+          bun build ./cli.ts --compile --target=bun-darwin-arm64 --outfile tennis-darwin-arm64
+          bun build ./cli.ts --compile --target=bun-darwin-x64 --outfile tennis-darwin-x64
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ needs.release-please.outputs.tag_name }} \
+            tennis-linux-x64 \
+            tennis-darwin-arm64 \
+            tennis-darwin-x64
