@@ -3,13 +3,14 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const SFRECPARK_URL = 'https://sfrecpark.org/1446/Reservable-Tennis-Courts';
-const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 day
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = resolve(__dirname, '..', '.cache');
 const CACHE_FILE = resolve(CACHE_DIR, 'courts.json');
 
-let _mem = null;
+let _courts = null;
+let _inflight = null;
 
 function readCache() {
   try {
@@ -44,18 +45,23 @@ async function fetchCourtsFromSFRecPark() {
   return [...seen.values()];
 }
 
-export async function getCourts() {
-  if (_mem) return _mem;
-
-  // Try disk cache first
+async function loadCourts() {
   const cached = readCache();
-  if (cached) {
-    _mem = cached;
-    return _mem;
-  }
+  if (cached) return cached;
 
-  // Fetch fresh, cache to disk
-  _mem = await fetchCourtsFromSFRecPark();
-  writeCache(_mem);
-  return _mem;
+  const courts = await fetchCourtsFromSFRecPark();
+  writeCache(courts);
+  return courts;
+}
+
+export async function getCourts() {
+  if (_courts) return _courts;
+  if (_inflight) return _inflight;
+  _inflight = loadCourts();
+  try {
+    _courts = await _inflight;
+    return _courts;
+  } finally {
+    _inflight = null;
+  }
 }
