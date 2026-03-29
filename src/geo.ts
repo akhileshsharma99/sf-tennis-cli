@@ -1,6 +1,36 @@
-const toRad = (d) => (d * Math.PI) / 180;
+interface IpLocation {
+	lat: number;
+	lng: number;
+	label: string;
+}
 
-export function distanceMiles(lat1, lng1, lat2, lng2) {
+interface GeocodingResult {
+	lat: number;
+	lng: number;
+}
+
+interface IpInfoResponse {
+	loc: string;
+	city: string;
+	region: string;
+}
+
+interface CensusGeocodeResponse {
+	result: {
+		addressMatches: Array<{
+			coordinates: { x: number; y: number };
+		}>;
+	};
+}
+
+const toRad = (d: number): number => (d * Math.PI) / 180;
+
+export function distanceMiles(
+	lat1: number,
+	lng1: number,
+	lat2: number,
+	lng2: number,
+): number {
 	const R = 3958.8;
 	const dLat = toRad(lat2 - lat1);
 	const dLng = toRad(lng2 - lng1);
@@ -11,10 +41,10 @@ export function distanceMiles(lat1, lng1, lat2, lng2) {
 }
 
 // Get current location via IP geolocation
-export async function getCurrentLocation() {
+export async function getCurrentLocation(): Promise<IpLocation | null> {
 	try {
 		const res = await fetch("https://ipinfo.io/json");
-		const data = await res.json();
+		const data = (await res.json()) as IpInfoResponse;
 		const [lat, lng] = data.loc.split(",").map(Number);
 		return { lat, lng, label: `${data.city}, ${data.region} (IP-based)` };
 	} catch {
@@ -23,10 +53,12 @@ export async function getCurrentLocation() {
 }
 
 // Geocode an address to lat/lng using US Census Bureau (free, no API key)
-export async function geocode(address) {
+export async function geocode(
+	address: string,
+): Promise<GeocodingResult | null> {
 	const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(address)}&benchmark=Public_AR_Current&format=json`;
 	const res = await fetch(url);
-	const data = await res.json();
+	const data = (await res.json()) as CensusGeocodeResponse;
 	const match = data.result?.addressMatches?.[0];
 	if (!match) return null;
 	return {

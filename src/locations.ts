@@ -1,20 +1,28 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readJson, writeJson } from "./fs-utils.js";
-import { geocode } from "./geo.js";
+import { readJson, writeJson } from "./fs-utils";
+import { geocode } from "./geo";
+
+export interface Location {
+	name: string;
+	address: string;
+	lat: number | null;
+	lng: number | null;
+	default?: boolean;
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCATIONS_FILE = resolve(__dirname, "..", "locations.json");
 
-function readLocationsFile() {
-	return readJson(LOCATIONS_FILE, []);
+function readLocationsFile(): Location[] {
+	return readJson<Location[]>(LOCATIONS_FILE, []) ?? [];
 }
 
-function writeLocationsFile(locations) {
+function writeLocationsFile(locations: Location[]): void {
 	writeJson(LOCATIONS_FILE, locations, { pretty: true });
 }
 
-async function loadLocations({ quiet = false } = {}) {
+async function loadLocations({ quiet = false } = {}): Promise<Location[]> {
 	const locations = readLocationsFile();
 	let changed = false;
 
@@ -36,14 +44,17 @@ async function loadLocations({ quiet = false } = {}) {
 	return locations;
 }
 
-export async function getLocation(name) {
+export async function getLocation(name: string): Promise<Location | null> {
 	const locations = await loadLocations();
 	return (
 		locations.find((l) => l.name.toLowerCase() === name.toLowerCase()) ?? null
 	);
 }
 
-export async function addLocation(name, address) {
+export async function addLocation(
+	name: string,
+	address: string,
+): Promise<Location | null> {
 	const locations = readLocationsFile();
 	const existing = locations.findIndex(
 		(l) => l.name.toLowerCase() === name.toLowerCase(),
@@ -58,14 +69,14 @@ export async function addLocation(name, address) {
 	}
 	console.log("done");
 
-	const loc = { name, address, lat: coords.lat, lng: coords.lng };
+	const loc: Location = { name, address, lat: coords.lat, lng: coords.lng };
 	if (locations.length === 0) loc.default = true;
 	locations.push(loc);
 	writeLocationsFile(locations);
 	return loc;
 }
 
-export function removeLocation(name) {
+export function removeLocation(name: string): boolean {
 	const locations = readLocationsFile();
 	const idx = locations.findIndex(
 		(l) => l.name.toLowerCase() === name.toLowerCase(),
@@ -76,12 +87,12 @@ export function removeLocation(name) {
 	return true;
 }
 
-export function getDefaultLocation() {
+export function getDefaultLocation(): Location | null {
 	const locations = readLocationsFile();
 	return locations.find((l) => l.default) ?? locations[0] ?? null;
 }
 
-export function setDefaultLocation(name) {
+export function setDefaultLocation(name: string): boolean {
 	const locations = readLocationsFile();
 	const idx = locations.findIndex(
 		(l) => l.name.toLowerCase() === name.toLowerCase(),
@@ -93,6 +104,6 @@ export function setDefaultLocation(name) {
 	return true;
 }
 
-export function listLocations() {
+export function listLocations(): Location[] {
 	return readLocationsFile();
 }

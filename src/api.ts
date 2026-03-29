@@ -1,7 +1,105 @@
-import { getCourts } from "./courts.js";
-import { distanceMiles } from "./geo.js";
+import type { Court } from "./courts";
+import { getCourts } from "./courts";
+import { distanceMiles } from "./geo";
 
-const HEADERS = {
+// --- API response types ---
+
+interface RecUsLocationCourt {
+	courtNumber: string;
+	maxReservationTime?: string;
+	defaultReservationWindowDays?: number;
+	reservationReleaseTimeLocal?: string;
+	sports?: Array<{ name: string }>;
+}
+
+interface RecUsLocation {
+	lat: string;
+	lng: string;
+	formattedAddress: string;
+	courts?: RecUsLocationCourt[];
+}
+
+interface RecUsLocationResponse {
+	location?: RecUsLocation;
+	lat?: string;
+	lng?: string;
+	formattedAddress?: string;
+	courts?: RecUsLocationCourt[];
+}
+
+interface ScheduleEntry {
+	referenceType: string;
+}
+
+interface ScheduleCourtDay {
+	courtNumber: string;
+	schedule: Record<string, ScheduleEntry>;
+	sports?: Array<{ name: string }>;
+}
+
+interface ScheduleResponse {
+	dates?: Record<string, ScheduleCourtDay[]>;
+}
+
+// --- Exported types ---
+
+export interface CourtMeta {
+	slotDuration: number;
+	windowDays: number;
+	releaseTime: string;
+}
+
+export interface TimeSlot {
+	start: string;
+	end: string;
+}
+
+interface CourtResult {
+	courtNumber: string;
+	sports: string[] | undefined;
+	available: TimeSlot[];
+	booked: TimeSlot[];
+	pendingSlots: TimeSlot[];
+	opensAt: Date | null;
+}
+
+export interface CourtLocationResult {
+	name: string;
+	slug: string;
+	locationId: string;
+	address: string;
+	lat: number;
+	lng: number;
+	distance: number;
+	url: string;
+	courts: CourtResult[];
+	totalAvailableSlots: number;
+	totalPendingSlots: number;
+	opensAt: Date | null;
+}
+
+interface CourtLocationError {
+	slug: string;
+	name: string;
+	error: string;
+}
+
+interface FetchAllCourtsOptions {
+	date: string;
+	refLat: number;
+	refLng: number;
+	maxDistance?: number;
+	timeRange?: [number, number] | null;
+}
+
+interface FetchAllCourtsResult {
+	courts: CourtLocationResult[];
+	errors: number;
+}
+
+// --- Implementation ---
+
+const HEADERS: Record<string, string> = {
 	"User-Agent":
 		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
 	Origin: "https://www.rec.us",
@@ -9,9 +107,10 @@ const HEADERS = {
 	Accept: "application/json",
 };
 
-const _locationIdCache = new Map();
-export async function resolveLocationId(slug) {
-	if (_locationIdCache.has(slug)) return _locationIdCache.get(slug);
+const _locationIdCache = new Map<string, string>();
+export async function resolveLocationId(slug: string): Promise<string | null> {
+	const cached = _locationIdCache.get(slug);
+	if (cached) return cached;
 	const res = await fetch(`https://www.rec.us/${slug}`, { headers: HEADERS });
 	const html = await res.text();
 	const id = html.match(/"locationId":"([^"]+)"/)?.[1] ?? null;
@@ -19,12 +118,12 @@ export async function resolveLocationId(slug) {
 	return id;
 }
 
-export async function fetchJson(url) {
+export async function fetchJson<T = unknown>(url: string): Promise<T | null> {
 	const res = await fetch(url, { headers: HEADERS });
 	if (!res.ok) return null;
 	const text = await res.text();
 	try {
-		return JSON.parse(text);
+		return JSON.parse(text) as T;
 	} catch {
 		return null;
 	}
@@ -32,14 +131,16 @@ export async function fetchJson(url) {
 
 // --- Shared helpers used by both CLI and notify ---
 
-export const DEFAULT_COURT_META = {
+export const DEFAULT_COURT_META: CourtMeta = {
 	slotDuration: 60,
 	windowDays: 7,
 	releaseTime: "00:00:00",
 };
 
-export function buildCourtMeta(locationCourts) {
-	const meta = {};
+export function buildCourtMeta(
+	locationCourts: RecUsLocationCourt[] | undefined,
+): Record<string, CourtMeta> {
+	const meta: Record<string, CourtMeta> = {};
 	for (const c of locationCourts ?? []) {
 		meta[c.courtNumber] = {
 			slotDuration: parseMinutes(c.maxReservationTime),
@@ -50,7 +151,7 @@ export function buildCourtMeta(locationCourts) {
 	return meta;
 }
 
-export function computeReleaseDate(dateStr, meta) {
+export function computeReleaseDate(dateStr: string, meta: CourtMeta): Date {
 	const releaseDate = new Date(`${dateStr}T00:00:00`);
 	releaseDate.setDate(releaseDate.getDate() - meta.windowDays);
 	const [rh, rm] = meta.releaseTime.split(":").map(Number);
@@ -58,8 +159,11 @@ export function computeReleaseDate(dateStr, meta) {
 	return releaseDate;
 }
 
-export function parseReservableSlots(schedule, slotDuration) {
-	const slots = [];
+export function parseReservableSlots(
+	schedule: Record<string, ScheduleEntry> | undefined,
+	slotDuration: number,
+): TimeSlot[] {
+	const slots: TimeSlot[] = [];
 	for (const [range, info] of Object.entries(schedule ?? {})) {
 		const [start, end] = range.split(",").map((s) => s.trim());
 		if (info.referenceType === "RESERVABLE") {
@@ -71,7 +175,12 @@ export function parseReservableSlots(schedule, slotDuration) {
 
 // --- CLI data fetching ---
 
-async function fetchCourtData(court, date, refLat, refLng) {
+async function fetchCourtData(
+	court: Court,
+	date: string,
+	refLat: number,
+	refLng: number,
+): Promise<CourtLocationResult | CourtLocationError> {
 	const locationId = await resolveLocationId(court.slug);
 	if (!locationId) {
 		return { ...court, error: "Could not resolve locationId" };
@@ -79,10 +188,10 @@ async function fetchCourtData(court, date, refLat, refLng) {
 
 	const dateKey = date.replace(/-/g, "");
 	const [locRes, schedRes] = await Promise.all([
-		fetchJson(
+		fetchJson<RecUsLocationResponse>(
 			`https://api.rec.us/v1/locations/${locationId}?publishedSites=true`,
 		),
-		fetchJson(
+		fetchJson<ScheduleResponse>(
 			`https://api.rec.us/v1/locations/${locationId}/schedule?startDate=${date}`,
 		),
 	]);
@@ -91,7 +200,8 @@ async function fetchCourtData(court, date, refLat, refLng) {
 		return { ...court, error: "API request failed" };
 	}
 
-	const loc = locRes.location ?? locRes;
+	const loc: RecUsLocation =
+		locRes.location ?? (locRes as unknown as RecUsLocation);
 	const lat = parseFloat(loc.lat);
 	const lng = parseFloat(loc.lng);
 	const dist = Math.round(distanceMiles(refLat, refLng, lat, lng) * 100) / 100;
@@ -99,7 +209,7 @@ async function fetchCourtData(court, date, refLat, refLng) {
 
 	const todayCourts = schedRes.dates?.[dateKey] ?? [];
 	const now = new Date();
-	const courts = todayCourts.map((c) => {
+	const courts: CourtResult[] = todayCourts.map((c) => {
 		const meta = courtMeta[c.courtNumber] || DEFAULT_COURT_META;
 		const releaseDate = computeReleaseDate(date, meta);
 		const windowOpen = now >= releaseDate;
@@ -107,7 +217,7 @@ async function fetchCourtData(court, date, refLat, refLng) {
 		const reservable = parseReservableSlots(c.schedule, meta.slotDuration);
 		const available = windowOpen ? reservable : [];
 		const pendingSlots = windowOpen ? [] : reservable;
-		const booked = [];
+		const booked: TimeSlot[] = [];
 		for (const [range, info] of Object.entries(c.schedule ?? {})) {
 			if (info.referenceType === "RESERVATION") {
 				const [start, end] = range.split(",").map((s) => s.trim());
@@ -124,7 +234,9 @@ async function fetchCourtData(court, date, refLat, refLng) {
 		};
 	});
 
-	const opensAtDates = courts.map((c) => c.opensAt).filter(Boolean);
+	const opensAtDates = courts
+		.map((c) => c.opensAt)
+		.filter((d): d is Date => d !== null);
 	const earliestOpensAt =
 		opensAtDates.length > 0
 			? new Date(Math.min(...opensAtDates.map((d) => d.getTime())))
@@ -150,25 +262,33 @@ async function fetchCourtData(court, date, refLat, refLng) {
 	};
 }
 
+function isCourtLocationResult(
+	r: CourtLocationResult | CourtLocationError,
+): r is CourtLocationResult {
+	return !("error" in r);
+}
+
 export async function fetchAllCourts({
 	date,
 	refLat,
 	refLng,
 	maxDistance,
 	timeRange,
-}) {
+}: FetchAllCourtsOptions): Promise<FetchAllCourtsResult> {
 	const courts = await getCourts();
 	const results = await Promise.all(
 		courts.map((court) =>
-			fetchCourtData(court, date, refLat, refLng).catch(() => ({
-				...court,
-				error: "fetch failed",
-			})),
+			fetchCourtData(court, date, refLat, refLng).catch(
+				(): CourtLocationError => ({
+					...court,
+					error: "fetch failed",
+				}),
+			),
 		),
 	);
 
-	const errors = results.filter((r) => r.error);
-	let filtered = results.filter((r) => !r.error);
+	const errors = results.filter((r) => !isCourtLocationResult(r));
+	let filtered = results.filter(isCourtLocationResult);
 
 	// Filter by max distance
 	if (maxDistance != null) {
@@ -178,7 +298,7 @@ export async function fetchAllCourts({
 	// Filter by time range (overlap check)
 	if (timeRange) {
 		const [startHour, endHour] = timeRange;
-		const timeFilter = (slot) => {
+		const timeFilter = (slot: TimeSlot): boolean => {
 			const slotStart = parseHour(slot.start);
 			const slotEnd = parseHour(slot.end);
 			return (
@@ -218,32 +338,36 @@ export async function fetchAllCourts({
 	return { courts: filtered, errors: errors.length };
 }
 
-export function parseHour(time) {
+export function parseHour(time: string | undefined): number | null {
 	const m = time?.match(/^(\d{1,2}):/);
 	return m ? parseInt(m[1], 10) : null;
 }
 
-function parseMinutes(duration) {
+function parseMinutes(duration: string | undefined): number {
 	if (!duration) return 60;
 	const [h, m] = duration.split(":").map(Number);
 	return h * 60 + m;
 }
 
-function timeToMinutes(time) {
+function timeToMinutes(time: string): number {
 	const [h, m] = time.split(":").map(Number);
 	return h * 60 + m;
 }
 
-function minutesToTime(mins) {
+function minutesToTime(mins: number): string {
 	const h = String(Math.floor(mins / 60)).padStart(2, "0");
 	const m = String(mins % 60).padStart(2, "0");
 	return `${h}:${m}`;
 }
 
-function splitIntoSlots(start, end, durationMins) {
+function splitIntoSlots(
+	start: string,
+	end: string,
+	durationMins: number,
+): TimeSlot[] {
 	const startMins = timeToMinutes(start);
 	const endMins = timeToMinutes(end);
-	const slots = [];
+	const slots: TimeSlot[] = [];
 	for (let t = startMins; t + durationMins <= endMins; t += durationMins) {
 		slots.push({
 			start: minutesToTime(t),
