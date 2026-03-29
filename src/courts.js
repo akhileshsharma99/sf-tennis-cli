@@ -1,6 +1,30 @@
-const SFRECPARK_URL = 'https://sfrecpark.org/1446/Reservable-Tennis-Courts';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-let _cached = null;
+const SFRECPARK_URL = 'https://sfrecpark.org/1446/Reservable-Tennis-Courts';
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 day
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CACHE_DIR = resolve(__dirname, '..', '.cache');
+const CACHE_FILE = resolve(CACHE_DIR, 'courts.json');
+
+let _mem = null;
+
+function readCache() {
+  try {
+    const { ts, courts } = JSON.parse(readFileSync(CACHE_FILE, 'utf8'));
+    if (Date.now() - ts < CACHE_MAX_AGE_MS && courts?.length > 0) return courts;
+  } catch {}
+  return null;
+}
+
+function writeCache(courts) {
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true });
+    writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), courts }) + '\n');
+  } catch {}
+}
 
 async function fetchCourtsFromSFRecPark() {
   const res = await fetch(SFRECPARK_URL);
@@ -21,7 +45,17 @@ async function fetchCourtsFromSFRecPark() {
 }
 
 export async function getCourts() {
-  if (_cached) return _cached;
-  _cached = await fetchCourtsFromSFRecPark();
-  return _cached;
+  if (_mem) return _mem;
+
+  // Try disk cache first
+  const cached = readCache();
+  if (cached) {
+    _mem = cached;
+    return _mem;
+  }
+
+  // Fetch fresh, cache to disk
+  _mem = await fetchCourtsFromSFRecPark();
+  writeCache(_mem);
+  return _mem;
 }
