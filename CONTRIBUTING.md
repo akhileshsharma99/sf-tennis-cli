@@ -10,13 +10,14 @@ bun link  # makes `tennis` available globally
 ## Project Structure
 
 ```
-├── cli.js              CLI entry point
-├── notify.js           GitHub Actions notification script
+├── cli.ts              CLI entry point
+├── notify.ts           GitHub Actions notification script
 ├── src/
-│   ├── api.js          rec.us API client + shared helpers
-│   ├── courts.js       Court list (fetched from sfrecpark.org, with fallback)
-│   ├── geo.js          Haversine distance + geocoding
-│   └── locations.js    Saved location management
+│   ├── api.ts          rec.us API client + shared helpers
+│   ├── courts.ts       Court list (fetched from sfrecpark.org, with fallback)
+│   ├── fs-utils.ts     readJson/writeJson utilities
+│   ├── geo.ts          Haversine distance + geocoding
+│   └── locations.ts    Saved location management
 ├── .github/workflows/
 │   └── notify.yml      Cron notification workflow
 └── locations.json      User's saved locations (gitignored)
@@ -41,12 +42,12 @@ tennis -d tomorrow -r 9-17
 tennis -d tuesday -r 17-19 --json
 
 # Notifications (local test)
-HOME_LAT=37.7793 HOME_LNG=-122.4193 NTFY_TOPIC=test bun notify.js
+HOME_LAT=37.7793 HOME_LNG=-122.4193 NTFY_TOPIC=test bun notify.ts
 ```
 
 ## Shared Code
 
-`src/api.js` exports helpers used by both `cli.js` and `notify.js`:
+`src/api.ts` exports helpers used by both `cli.ts` and `notify.ts`:
 - `buildCourtMeta()` — parses court slot durations and booking windows
 - `computeReleaseDate()` — calculates when a court's booking window opens
 - `parseReservableSlots()` — extracts bookable time slots from schedule data

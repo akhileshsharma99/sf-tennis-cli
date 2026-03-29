@@ -2,11 +2,18 @@
 
 CLI to find available tennis court times across all 27 SF Rec & Park courts. Fetches real-time availability from [rec.us](https://www.rec.us) and sorts by distance from your location. Optionally, get push notifications via [ntfy.sh](https://ntfy.sh) when courts matching your day/time/distance preferences open up — runs on GitHub Actions every 15 minutes.
 
-## Setup
+## Install
 
-```bash
-bun install
-bun link  # makes `tennis` available globally
+Shell (Mac, Linux):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/akhileshsharma99/sf-tennis-cli/main/install.sh | sh
+```
+
+Build from source ([Bun](https://bun.sh)):
+
+```sh
+bun install && bun link
 ```
 
 ### Add your locations
@@ -71,7 +78,7 @@ gh secret set NTFY_TOPIC    # your ntfy topic name
 
 # Local testing
 cp .env.example .env         # then fill in values
-bun notify.js                # run locally
+bun notify.ts                # run locally
 ```
 
 4. Optionally set variables for preferences (or use defaults):

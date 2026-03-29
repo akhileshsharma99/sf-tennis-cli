@@ -1,6 +1,16 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readJson, writeJson } from "./fs-utils.js";
+import { readJson, writeJson } from "./fs-utils";
+
+export interface Court {
+	slug: string;
+	name: string;
+}
+
+interface CourtsCache {
+	ts: number;
+	courts: Court[];
+}
 
 const SFRECPARK_URL = "https://sfrecpark.org/1446/Reservable-Tennis-Courts";
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -8,11 +18,11 @@ const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE = resolve(__dirname, "..", ".cache", "courts.json");
 
-let _courts = null;
-let _inflight = null;
+let _courts: Court[] | null = null;
+let _inflight: Promise<Court[]> | null = null;
 
-function readCache() {
-	const data = readJson(CACHE_FILE);
+function readCache(): Court[] | null {
+	const data = readJson<CourtsCache>(CACHE_FILE);
 	if (
 		data &&
 		Date.now() - data.ts < CACHE_MAX_AGE_MS &&
@@ -23,20 +33,22 @@ function readCache() {
 	return null;
 }
 
-function writeCache(courts) {
+function writeCache(courts: Court[]): void {
 	try {
 		writeJson(CACHE_FILE, { ts: Date.now(), courts });
 	} catch (err) {
-		console.warn(`[cache] Failed to write ${CACHE_FILE}: ${err.message}`);
+		console.warn(
+			`[cache] Failed to write ${CACHE_FILE}: ${(err as Error).message}`,
+		);
 	}
 }
 
-async function fetchCourtsFromSFRecPark() {
+async function fetchCourtsFromSFRecPark(): Promise<Court[]> {
 	const res = await fetch(SFRECPARK_URL);
 	if (!res.ok) throw new Error(`sfrecpark.org returned ${res.status}`);
 	const html = await res.text();
 
-	const seen = new Map();
+	const seen = new Map<string, Court>();
 	const regex =
 		/href="https?:\/\/(?:www\.)?rec\.us\/([a-z0-9-]+)"[^>]*>([^<]+)/gi;
 	for (const match of html.matchAll(regex)) {
@@ -56,7 +68,7 @@ async function fetchCourtsFromSFRecPark() {
 	return [...seen.values()];
 }
 
-async function loadCourts() {
+async function loadCourts(): Promise<Court[]> {
 	const cached = readCache();
 	if (cached) return cached;
 
@@ -65,7 +77,7 @@ async function loadCourts() {
 	return courts;
 }
 
-export async function getCourts() {
+export async function getCourts(): Promise<Court[]> {
 	if (_courts) return _courts;
 	if (_inflight) return _inflight;
 	_inflight = loadCourts();

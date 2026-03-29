@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { program } from "commander";
 import dayjs from "dayjs";
-import { fetchAllCourts } from "./src/api.js";
-import { getCurrentLocation } from "./src/geo.js";
+import pkg from "./package.json";
+import { fetchAllCourts } from "./src/api";
+import { formatDateLabel } from "./src/format";
+import type { Coords } from "./src/geo";
+import { getCurrentLocation } from "./src/geo";
 import {
 	addLocation,
 	getDefaultLocation,
@@ -15,16 +15,19 @@ import {
 	listLocations,
 	removeLocation,
 	setDefaultLocation,
-} from "./src/locations.js";
+} from "./src/locations";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const { version } = JSON.parse(
-	readFileSync(resolve(__dirname, "package.json"), "utf8"),
-);
+interface CliOptions {
+	date?: string;
+	location?: string;
+	range?: string;
+	maxDistance?: number;
+	json?: boolean;
+}
 
 program
 	.name("tennis")
-	.version(version)
+	.version(pkg.version)
 	.description("Find available SF tennis court times near you")
 	.option(
 		"-d, --date <date>",
@@ -40,26 +43,25 @@ program
 	)
 	.option("-m, --max-distance <miles>", "max distance in miles", parseFloat)
 	.option("--json", "output raw JSON")
-	.action(async (opts) => {
+	.action(async (opts: CliOptions) => {
 		const date = opts.date
 			? parseDate(opts.date)
 			: dayjs().format("YYYY-MM-DD");
 
-		// Resolve reference location
-		let refLat, refLng, refLabel;
+		let ref: Coords;
+		let refLabel: string;
 		const locStr = opts.location?.toLowerCase();
 
 		if (!locStr) {
 			const def = getDefaultLocation();
-			if (!def || def.lat == null) {
+			if (!def || def.lat == null || def.lng == null) {
 				console.error(chalk.red("No default location set."));
 				console.error(
 					chalk.dim('Add one with: tennis location add <name> "<address>"'),
 				);
 				process.exit(1);
 			}
-			refLat = def.lat;
-			refLng = def.lng;
+			ref = { lat: def.lat, lng: def.lng };
 			refLabel = `${def.name} (${def.address})`;
 		} else if (locStr === "current") {
 			process.stdout.write(chalk.dim("Getting current location... "));
@@ -68,8 +70,7 @@ program
 				console.error(chalk.red("Could not determine current location"));
 				process.exit(1);
 			}
-			refLat = loc.lat;
-			refLng = loc.lng;
+			ref = { lat: loc.lat, lng: loc.lng };
 			refLabel = loc.label;
 			console.log(chalk.dim(refLabel));
 		} else if (
@@ -77,12 +78,11 @@ program
 			locStr.split(",").every((s) => !Number.isNaN(parseFloat(s)))
 		) {
 			const [lat, lng] = locStr.split(",").map(Number);
-			refLat = lat;
-			refLng = lng;
+			ref = { lat, lng };
 			refLabel = `${lat}, ${lng}`;
 		} else {
 			const loc = await getLocation(locStr);
-			if (!loc || loc.lat == null) {
+			if (!loc || loc.lat == null || loc.lng == null) {
 				console.error(chalk.red(`Unknown location: "${locStr}".`));
 				console.error(
 					chalk.dim('Add it with: tennis location add <name> "<address>"'),
@@ -90,13 +90,11 @@ program
 				console.error(chalk.dim("Or use: -l current, -l lat,lng"));
 				process.exit(1);
 			}
-			refLat = loc.lat;
-			refLng = loc.lng;
+			ref = { lat: loc.lat, lng: loc.lng };
 			refLabel = `${loc.name} (${loc.address})`;
 		}
 
-		// Parse time range
-		let timeRange = null;
+		let timeRange: [number, number] | null = null;
 		if (opts.range) {
 			const parts = opts.range.split("-").map(Number);
 			if (
@@ -104,7 +102,7 @@ program
 				!Number.isNaN(parts[0]) &&
 				!Number.isNaN(parts[1])
 			) {
-				timeRange = parts;
+				timeRange = parts as [number, number];
 			} else {
 				console.error(
 					chalk.red('Invalid time range. Use format: "9-17" (9am to 5pm)'),
@@ -128,8 +126,7 @@ program
 		process.stdout.write(chalk.dim("Fetching court data..."));
 		const { courts: results, errors } = await fetchAllCourts({
 			date,
-			refLat,
-			refLng,
+			ref,
 			maxDistance: opts.maxDistance,
 			timeRange,
 		});
@@ -189,13 +186,12 @@ program
 		);
 	});
 
-// --- Subcommand: manage locations ---
 const loc = program.command("location").description("Manage saved locations");
 
 loc
 	.command("add <name> <address>")
 	.description("Add a named location (geocodes the address automatically)")
-	.action(async (name, address) => {
+	.action(async (name: string, address: string) => {
 		const result = await addLocation(name, address);
 		if (result) {
 			console.log(chalk.green(`Saved "${name}" → ${result.address}`));
@@ -210,7 +206,7 @@ loc
 loc
 	.command("remove <name>")
 	.description("Remove a saved location")
-	.action((name) => {
+	.action((name: string) => {
 		if (removeLocation(name)) {
 			console.log(chalk.green(`Removed "${name}".`));
 		} else {
@@ -241,7 +237,7 @@ loc
 loc
 	.command("default <name>")
 	.description("Set a location as the default")
-	.action((name) => {
+	.action((name: string) => {
 		if (setDefaultLocation(name)) {
 			console.log(chalk.green(`Default location set to "${name}".`));
 		} else {
@@ -250,7 +246,7 @@ loc
 		}
 	});
 
-const DAY_NAMES = {
+const DAY_NAMES: Record<string, number> = {
 	su: 0,
 	sun: 0,
 	sunday: 0,
@@ -274,7 +270,7 @@ const DAY_NAMES = {
 	saturday: 6,
 };
 
-function parseDate(input) {
+function parseDate(input: string): string {
 	const s = input.trim().toLowerCase();
 	if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 	if (s === "today") return dayjs().format("YYYY-MM-DD");
@@ -294,36 +290,19 @@ function parseDate(input) {
 	process.exit(1);
 }
 
-function formatHour(h) {
+function formatHour(h: number): string {
 	if (h === 0 || h === 24) return "12am";
 	if (h === 12) return "12pm";
 	return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-function formatOpensAt(date) {
-	const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-	const months = [
-		"Jan",
-		"Feb",
-		"Mar",
-		"Apr",
-		"May",
-		"Jun",
-		"Jul",
-		"Aug",
-		"Sep",
-		"Oct",
-		"Nov",
-		"Dec",
-	];
-	const day = days[date.getDay()];
-	const month = months[date.getMonth()];
-	const d = date.getDate();
+function formatOpensAt(date: Date): string {
+	const label = formatDateLabel(date);
 	const h = date.getHours();
 	const m = date.getMinutes();
 	const timeStr =
 		formatHour(h) + (m > 0 ? `:${String(m).padStart(2, "0")}` : "");
-	return `${day} ${month} ${d} at ${timeStr}`;
+	return `${label} at ${timeStr}`;
 }
 
 program.parse();

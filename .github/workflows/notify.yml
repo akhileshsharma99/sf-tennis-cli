@@ -16,7 +16,7 @@ jobs:
           key: courts-${{ github.run_id }}
           restore-keys: courts-
       - uses: oven-sh/setup-bun@v2
-      - run: bun notify.js
+      - run: bun notify.ts
         env:
           TZ: America/Los_Angeles
           HOME_LAT: ${{ secrets.HOME_LAT }}
