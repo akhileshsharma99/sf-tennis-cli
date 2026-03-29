@@ -24,7 +24,7 @@ bun link  # makes `tennis` available globally
 
 ## Court List
 
-The court list is fetched dynamically from [sfrecpark.org](https://sfrecpark.org/1446/Reservable-Tennis-Courts) at runtime. If the fetch fails, a hardcoded fallback in `src/courts.js` is used. New courts added by SF Rec & Park are picked up automatically.
+The court list is fetched dynamically from [sfrecpark.org](https://sfrecpark.org/1446/Reservable-Tennis-Courts) at runtime. New courts added by SF Rec & Park are picked up automatically.
 
 ## How the API Works
 
