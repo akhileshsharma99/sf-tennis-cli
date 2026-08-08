@@ -29,7 +29,7 @@ The court list is fetched dynamically from [sfrecpark.org](https://sfrecpark.org
 
 ## How the API Works
 
-1. **Resolve location ID** — scrape `rec.us/{slug}` HTML for the `locationId`
+1. **Resolve location ID** — scrape `rec.us/{slug}` HTML/RSC for the location UUID (og:url or escaped `locationId`)
 2. **Fetch location data** — `api.rec.us/v1/locations/{id}?publishedSites=true` returns court metadata (slot durations, booking windows)
 3. **Fetch schedule** — `api.rec.us/v1/locations/{id}/schedule?startDate=YYYY-MM-DD` returns per-court availability with `RESERVABLE` and `RESERVATION` entries
 4. **Reservation windows** — each court has `defaultReservationWindowDays` and `reservationReleaseTimeLocal` controlling when slots become bookable

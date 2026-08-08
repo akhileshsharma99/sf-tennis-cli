@@ -110,15 +110,27 @@ const HEADERS: Record<string, string> = {
 	Origin: REC_US_BASE,
 	Referer: `${REC_US_BASE}/`,
 	Accept: "application/json",
+	"sec-fetch-site": "same-site",
+	"sec-fetch-mode": "cors",
+	"sec-fetch-dest": "empty",
 };
+
+/** Extract a location UUID from a rec.us HTML/RSC payload. */
+export function extractLocationId(html: string): string | null {
+	return (
+		html.match(/rec\.us\/locations\/([a-f0-9-]{36})/i)?.[1] ??
+		html.match(/\\?"locationId\\?":\\?"([a-f0-9-]{36})\\?"/)?.[1] ??
+		null
+	);
+}
 
 const _locationIdCache = new Map<string, string>();
 export async function resolveLocationId(slug: string): Promise<string | null> {
 	const cached = _locationIdCache.get(slug);
 	if (cached) return cached;
 	const res = await fetch(`${REC_US_BASE}/${slug}`, { headers: HEADERS });
-	const html = await res.text();
-	const id = html.match(/"locationId":"([^"]+)"/)?.[1] ?? null;
+	if (!res.ok) return null;
+	const id = extractLocationId(await res.text());
 	if (id) _locationIdCache.set(slug, id);
 	return id;
 }

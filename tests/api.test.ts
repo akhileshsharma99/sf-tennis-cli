@@ -4,10 +4,40 @@ import {
 	buildCourtMeta,
 	computeReleaseDate,
 	DEFAULT_COURT_META,
+	extractLocationId,
 	parseHour,
 	parseReservableSlots,
 	scheduleUrl,
 } from "../src/api";
+
+describe("extractLocationId", () => {
+	test("extracts from og:url locations path", () => {
+		const html =
+			'<meta content="https://www.rec.us/locations/81cd2b08-8ea6-40ee-8c89-aeba92506576" property="og:url"/>';
+		expect(extractLocationId(html)).toBe(
+			"81cd2b08-8ea6-40ee-8c89-aeba92506576",
+		);
+	});
+
+	test("extracts from escaped Next.js flight JSON", () => {
+		const html =
+			'self.__next_f.push([1,"21:{\\"locationId\\":\\"81cd2b08-8ea6-40ee-8c89-aeba92506576\\"}\\n"])';
+		expect(extractLocationId(html)).toBe(
+			"81cd2b08-8ea6-40ee-8c89-aeba92506576",
+		);
+	});
+
+	test("extracts from plain JSON", () => {
+		const html = '{"locationId":"81cd2b08-8ea6-40ee-8c89-aeba92506576"}';
+		expect(extractLocationId(html)).toBe(
+			"81cd2b08-8ea6-40ee-8c89-aeba92506576",
+		);
+	});
+
+	test("returns null when missing", () => {
+		expect(extractLocationId("<html></html>")).toBeNull();
+	});
+});
 
 describe("parseHour", () => {
 	test("parses standard HH:MM", () => {
