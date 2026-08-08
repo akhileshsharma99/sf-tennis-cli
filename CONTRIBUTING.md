@@ -4,8 +4,34 @@
 
 ```bash
 bun install
-bun link  # makes `tennis`, `pickleball`, and `courts` available globally
+bun link  # symlinks `tennis`, `pickleball`, and `courts` into ~/.bun/bin
 ```
+
+`bun link` prints "To use sf-tennis-cli in a project, run: bun link sf-tennis-cli"
+— ignore that, it's for consuming this as a dependency. The global bins are
+already live, and because they symlink straight into this checkout, edits take
+effect with no rebuild.
+
+If a release was previously installed with `install.sh`, its compiled binary at
+`/usr/local/bin/tennis` answers to the same name and can't be told apart by
+version — it goes stale silently, and a shell that hashed it before the symlink
+existed keeps using it. That looks exactly like `bun link` having failed.
+
+`--version` reports which install is actually running and warns about any others
+on PATH:
+
+```
+$ tennis --version
+1.1.1 (from source)
+  running: /Users/you/repos/sf-tennis-cli/cli.ts
+
+  warning: 1 other install(s) of this CLI on PATH:
+    /usr/local/bin/tennis
+  a stale one can shadow this in shells that already hashed it — run `hash -r`
+```
+
+`install.sh` also refuses to install over a different existing `tennis` without
+confirmation, so the two shouldn't coexist by accident.
 
 ## Project Structure
 

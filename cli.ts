@@ -17,6 +17,7 @@ import {
 	removeLocation,
 	setDefaultLocation,
 } from "./src/locations";
+import { versionReport } from "./src/runtime";
 import type { Sport } from "./src/sports";
 import { parseSports, sportLabel } from "./src/sports";
 
@@ -38,7 +39,7 @@ const BIN =
 
 program
 	.name(BIN)
-	.version(pkg.version)
+	.version(versionReport(pkg.version))
 	.description("Find available SF tennis and pickleball court times near you")
 	.option(
 		"-d, --date <date>",

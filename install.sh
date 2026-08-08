@@ -5,6 +5,21 @@ REPO="akhileshsharma99/sf-tennis-cli"
 INSTALL_DIR="/usr/local/bin"
 BIN_NAME="tennis"
 
+# A `bun link`ed checkout answers to the same name. Installing alongside it
+# gives you two of these that drift apart, with nothing to tell them apart.
+EXISTING="$(command -v "$BIN_NAME" 2>/dev/null || true)"
+if [ -n "$EXISTING" ] && [ "$EXISTING" != "${INSTALL_DIR}/${BIN_NAME}" ]; then
+  echo "Warning: ${BIN_NAME} is already installed at ${EXISTING}" >&2
+  echo "Installing to ${INSTALL_DIR}/${BIN_NAME} will create a second copy." >&2
+  echo "If that one is a dev checkout (bun link), 'bun unlink' it first." >&2
+  printf 'Continue anyway? [y/N] ' >&2
+  read -r reply < /dev/tty || reply=""
+  case "$reply" in
+    [yY]*) ;;
+    *) echo "Aborted." >&2; exit 1 ;;
+  esac
+fi
+
 # Detect OS and architecture
 OS="$(uname -s)"
 ARCH="$(uname -m)"
