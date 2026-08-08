@@ -1,28 +1,32 @@
 import { readJson, writeJson } from "./fs-utils";
-import { COURTS_CACHE_FILE } from "./paths";
+import { COORDS_CACHE_FILE, COURTS_CACHE_FILE } from "./paths";
 import type { Sport } from "./sports";
 
-/** Pickleball you can turn up and play without booking. */
+/** Courts you can turn up and play without booking. */
 export interface WalkUp {
-	/** Courts shared on a first-come basis. */
+	/** Courts open on a first-come basis. */
 	courts: number;
 	/** Directory wording for dedicated open play, verbatim. */
 	openPlay: string | null;
 }
 
+/** Walk-up courts per sport; a park can offer both. */
+export type WalkUpBySport = Partial<Record<Sport, WalkUp>>;
+
 export interface Court {
 	slug: string;
 	name: string;
 	sports: Sport[];
-	walkUp?: WalkUp;
+	walkUp?: WalkUpBySport;
 }
 
-/** A park with walk-up pickleball but nothing bookable through rec.us. */
-export interface WalkUpSpot extends WalkUp {
+/** A park with walk-up play but nothing bookable through rec.us. */
+export interface WalkUpSpot {
 	name: string;
 	url: string | null;
 	lat: number | null;
 	lng: number | null;
+	walkUp: WalkUpBySport;
 }
 
 interface CourtsCache {
@@ -35,13 +39,16 @@ interface CourtsCache {
 const TENNIS_URL = "https://sfrecpark.org/1446/Reservable-Tennis-Courts";
 const PICKLEBALL_URL = "https://sfrecpark.org/1772/Pickleball-Court-Directory";
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
+const COORDS_BATCH_SIZE = 8;
 
 const CACHE_FILE = COURTS_CACHE_FILE;
 
 interface CourtData {
 	courts: Court[];
 	walkUpSpots: WalkUpSpot[];
+	/** False when a directory page failed, so the result isn't worth caching. */
+	complete: boolean;
 }
 
 let _data: CourtData | null = null;
@@ -55,17 +62,22 @@ function readCache(): CourtData | null {
 		Date.now() - data.ts < CACHE_MAX_AGE_MS &&
 		data.courts?.length > 0
 	) {
-		return { courts: data.courts, walkUpSpots: data.walkUpSpots ?? [] };
+		return {
+			courts: data.courts,
+			walkUpSpots: data.walkUpSpots ?? [],
+			complete: true,
+		};
 	}
 	return null;
 }
 
-function writeCache(data: CourtData): void {
+function writeCache({ courts, walkUpSpots }: CourtData): void {
 	try {
 		writeJson(CACHE_FILE, {
 			version: CACHE_VERSION,
 			ts: Date.now(),
-			...data,
+			courts,
+			walkUpSpots,
 		});
 	} catch (err) {
 		console.warn(
@@ -139,36 +151,66 @@ function cellText(row: string, label: string): string | null {
 	return text || null;
 }
 
-function parseWalkUp(row: string): WalkUp | null {
-	const shared = parseInt(cellText(row, "Walk-up shared use") ?? "", 10) || 0;
-	// "Dedicated open play" is either a court count, "0", or schedule prose
-	const raw = cellText(row, "Dedicated open play") ?? "";
-	const numeric = /^\d+$/.test(raw);
-	const courts = shared + (numeric ? parseInt(raw, 10) : 0);
-	const openPlay = !numeric && raw ? raw : null;
+/** The two directories name their walk-up columns differently. */
+interface WalkUpColumns {
+	/** Columns holding a plain court count. */
+	counts: string[];
+	/** Column that is either a court count or free-text hours. */
+	openPlay?: string;
+}
+
+const TENNIS_COLUMNS: WalkUpColumns = { counts: ["Walk-up courts"] };
+const PICKLEBALL_COLUMNS: WalkUpColumns = {
+	counts: ["Walk-up shared use"],
+	openPlay: "Dedicated open play",
+};
+
+function parseWalkUp(row: string, cols: WalkUpColumns): WalkUp | null {
+	let courts = cols.counts.reduce(
+		(n, label) => n + (parseInt(cellText(row, label) ?? "", 10) || 0),
+		0,
+	);
+	let openPlay: string | null = null;
+
+	if (cols.openPlay) {
+		const raw = cellText(row, cols.openPlay) ?? "";
+		// Either a court count ("8") or schedule prose ("See schedule")
+		if (/^\d+$/.test(raw)) courts += parseInt(raw, 10);
+		else if (raw) openPlay = raw;
+	}
+
 	return courts > 0 || openPlay ? { courts, openPlay } : null;
 }
 
-export interface PickleballDirectory {
-	/** Rows bookable through rec.us, tagged pickleball. */
+export interface Directory {
+	/** Rows bookable through rec.us. */
 	courts: Court[];
 	/** Rows with walk-up play but no rec.us listing. */
 	walkUpSpots: WalkUpSpot[];
 }
 
 /**
- * Parse the pickleball directory page (1772), which uses a table rather than
- * the tennis page's aria-label links: the name lives in the Facility cell and
- * the rec.us link sits in the Reservable cell of the same row.
+ * Parse a court directory page. Both directories are tables keyed by a
+ * Facility cell, with the rec.us link (when there is one) in the reservable
+ * cell of the same row.
  */
-export function parseCourtsFromTable(html: string): PickleballDirectory {
+export function parseDirectoryTable(
+	html: string,
+	sport: Sport,
+	cols: WalkUpColumns = sport === "tennis"
+		? TENNIS_COLUMNS
+		: PICKLEBALL_COLUMNS,
+): Directory {
 	const courts = new Map<string, Court>();
 	const walkUpSpots: WalkUpSpot[] = [];
 
 	for (const [row] of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
 		const name = cellText(row, "Facility");
 		if (!name) continue;
-		const walkUp = parseWalkUp(row);
+		const walk = parseWalkUp(row, cols);
+		const walkUp: WalkUpBySport | undefined = walk
+			? { [sport]: walk }
+			: undefined;
 
 		const slug = row
 			.match(/href="https?:\/\/(?:www\.)?rec\.us\/([a-z0-9-]+)"/i)?.[1]
@@ -178,7 +220,7 @@ export function parseCourtsFromTable(html: string): PickleballDirectory {
 			courts.set(slug, {
 				slug,
 				name,
-				sports: ["pickleball"],
+				sports: [sport],
 				...(walkUp ? { walkUp } : {}),
 			});
 			continue;
@@ -192,7 +234,7 @@ export function parseCourtsFromTable(html: string): PickleballDirectory {
 			url: url ? decodeEntities(url) : null,
 			lat: null,
 			lng: null,
-			...walkUp,
+			walkUp,
 		});
 	}
 
@@ -212,6 +254,15 @@ export function parseFacilityCoords(
 	return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 }
 
+function mergeWalkUp(
+	a: WalkUpBySport | undefined,
+	b: WalkUpBySport | undefined,
+): WalkUpBySport | undefined {
+	if (!a) return b;
+	if (!b) return a;
+	return { ...a, ...b };
+}
+
 function mergeCourts(...lists: Court[][]): Court[] {
 	const merged = new Map<string, Court>();
 	for (const list of lists) {
@@ -224,7 +275,24 @@ function mergeCourts(...lists: Court[][]): Court[] {
 			for (const sport of court.sports) {
 				if (!existing.sports.includes(sport)) existing.sports.push(sport);
 			}
-			if (court.walkUp) existing.walkUp = court.walkUp;
+			existing.walkUp = mergeWalkUp(existing.walkUp, court.walkUp);
+		}
+	}
+	return [...merged.values()];
+}
+
+/** Parks appear on both directories under the same name, so merge by name. */
+function mergeWalkUpSpots(...lists: WalkUpSpot[][]): WalkUpSpot[] {
+	const merged = new Map<string, WalkUpSpot>();
+	for (const list of lists) {
+		for (const spot of list) {
+			const existing = merged.get(spot.name);
+			if (!existing) {
+				merged.set(spot.name, { ...spot, walkUp: { ...spot.walkUp } });
+				continue;
+			}
+			existing.walkUp = { ...existing.walkUp, ...spot.walkUp };
+			existing.url ??= spot.url;
 		}
 	}
 	return [...merged.values()];
@@ -236,41 +304,41 @@ async function fetchPage(url: string): Promise<string> {
 	return res.text();
 }
 
-/** Walk-up parks aren't in rec.us, so coordinates come from their facility page. */
-async function locateWalkUpSpots(spots: WalkUpSpot[]): Promise<WalkUpSpot[]> {
-	return Promise.all(
-		spots.map(async (spot) => {
-			if (!spot.url) return spot;
-			try {
-				const coords = parseFacilityCoords(await fetchPage(spot.url));
-				return coords ? { ...spot, ...coords } : spot;
-			} catch {
-				return spot;
-			}
-		}),
-	);
+async function fetchDirectory(url: string, sport: Sport): Promise<Directory> {
+	const html = await fetchPage(url);
+	const parsed = parseDirectoryTable(html, sport);
+	// The tennis page used to be a plain link list; keep that path as a fallback
+	if (parsed.courts.length === 0 && sport === "tennis") {
+		return { courts: parseCourtsFromHtml(html), walkUpSpots: [] };
+	}
+	return parsed;
 }
 
 async function fetchCourtsFromSFRecPark(): Promise<CourtData> {
-	const tennis = parseCourtsFromHtml(await fetchPage(TENNIS_URL));
-	if (tennis.length === 0)
+	const tennis = await fetchDirectory(TENNIS_URL, "tennis");
+	if (tennis.courts.length === 0)
 		throw new Error(
 			"No courts found on sfrecpark.org — page format may have changed",
 		);
 
 	// Losing the pickleball page degrades to tennis-only rather than failing
-	let pickleball: PickleballDirectory = { courts: [], walkUpSpots: [] };
+	let pickleball: Directory = { courts: [], walkUpSpots: [] };
+	let complete = true;
 	try {
-		pickleball = parseCourtsFromTable(await fetchPage(PICKLEBALL_URL));
-		if (pickleball.courts.length === 0)
+		pickleball = await fetchDirectory(PICKLEBALL_URL, "pickleball");
+		if (pickleball.courts.length === 0) {
 			console.warn("[courts] No pickleball courts found on sfrecpark.org");
+			complete = false;
+		}
 	} catch (err) {
 		console.warn(`[courts] Pickleball directory: ${(err as Error).message}`);
+		complete = false;
 	}
 
 	return {
-		courts: mergeCourts(tennis, pickleball.courts),
-		walkUpSpots: await locateWalkUpSpots(pickleball.walkUpSpots),
+		courts: mergeCourts(tennis.courts, pickleball.courts),
+		walkUpSpots: mergeWalkUpSpots(tennis.walkUpSpots, pickleball.walkUpSpots),
+		complete,
 	};
 }
 
@@ -279,7 +347,8 @@ async function loadCourts(): Promise<CourtData> {
 	if (cached) return cached;
 
 	const data = await fetchCourtsFromSFRecPark();
-	writeCache(data);
+	// Don't pin a degraded tennis-only list for 24h over one bad response
+	if (data.complete) writeCache(data);
 	return data;
 }
 
@@ -299,6 +368,42 @@ export async function getCourts(): Promise<Court[]> {
 	return (await getCourtData()).courts;
 }
 
+interface CoordsCache {
+	[facilityUrl: string]: { lat: number; lng: number };
+}
+
+/**
+ * Walk-up parks aren't in rec.us, so each one's coordinates come from its
+ * sfrecpark.org facility page. That's ~40 fetches, so it happens lazily —
+ * only the CLI asks for walk-ups, never the notifier — and the results are
+ * cached separately from the court list since park coordinates don't move.
+ */
 export async function getWalkUpSpots(): Promise<WalkUpSpot[]> {
-	return (await getCourtData()).walkUpSpots;
+	const spots = (await getCourtData()).walkUpSpots;
+	const cache = readJson<CoordsCache>(COORDS_CACHE_FILE, {}) ?? {};
+
+	const missing = spots.filter((s) => s.url && !cache[s.url]);
+	for (let i = 0; i < missing.length; i += COORDS_BATCH_SIZE) {
+		await Promise.all(
+			missing.slice(i, i + COORDS_BATCH_SIZE).map(async (spot) => {
+				if (!spot.url) return;
+				try {
+					const coords = parseFacilityCoords(await fetchPage(spot.url));
+					if (coords) cache[spot.url] = coords;
+				} catch {
+					// A park without coordinates just sorts last
+				}
+			}),
+		);
+	}
+
+	if (missing.length > 0) {
+		try {
+			writeJson(COORDS_CACHE_FILE, cache);
+		} catch (err) {
+			console.warn(`[cache] ${(err as Error).message}`);
+		}
+	}
+
+	return spots.map((s) => ({ ...s, ...(s.url ? cache[s.url] : null) }));
 }

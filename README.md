@@ -57,28 +57,26 @@ tennis --json                   # raw JSON output
 Locations that only have one of the two sports print a flat court list; where a
 location offers both, courts are grouped under a `Tennis` / `Pickleball` heading.
 
-### Walk-up pickleball
+### Walk-up courts
 
-Whenever pickleball is in scope, output ends with the walk-up courts you can
-just turn up and play — first-come-first-served or dedicated open play, no
-booking. Bookable locations that also have walk-up courts show a `+N walk-up`
-note, and any open-play hours are printed verbatim from the directory.
+Output ends with the courts you can just turn up and play — first-come-first-served
+or dedicated open play, no booking. Both directories list these: 38 parks in all,
+far more than the 28 you can book. Bookable locations that also have walk-up courts
+show a `+N walk-up` note, and any open-play hours are printed verbatim.
 
 ```
-Rossi  2.25 mi — 9 slots  +4 walk-up
-  600 Arguello Blvd · https://www.rec.us/rossi
-  Open play: See schedule
-  Court A: 15:00–16:30
+Joe DiMaggio  0.7 mi — no slots  +2 walk-up
 
-Walk-up pickleball — no booking
-  Alta Plaza                 0.78 mi  2 courts
-  Willie "Woo Woo" Wong      0.94 mi  1 court
-  States Street (Flint St)    2.5 mi  2 courts
+Walk-up courts — no booking
+  Alta Plaza             0.78 mi  3 tennis courts, 2 pickleball courts
+  Willie "Woo Woo" Wong  0.94 mi  1 pickleball court
+  Margaret S. Hayward    1.21 mi  2 tennis courts
 ```
 
 These parks aren't on rec.us, so there's no availability to check and nothing to
-notify on. Their coordinates come from their sfrecpark.org facility page and are
-cached with the court list; `--max-distance` applies to them too.
+notify on. Coordinates are scraped from each park's sfrecpark.org facility page
+on first use and cached in `coords.json`; the notifier never triggers that work.
+`--max-distance` applies to walk-ups too — worth using, since the full list is long.
 
 ### Manage locations
 
@@ -99,7 +97,7 @@ tennis location default <name>  # set default location
 | `-r, --range <start-end>`    | Time range filter in 24h, e.g. `9-17`                             |
 | `-s, --sport <sport>`        | `tennis`, `pickleball`, or `all` (default: depends on the command) |
 | `-m, --max-distance <miles>` | Max distance in miles                                             |
-| `--json`                     | Output raw JSON                                                   |
+| `--json`                     | Output raw JSON: `{ courts, walkUps }`                            |
 
 
 ## Notifications

@@ -30,12 +30,14 @@ interface CliOptions {
 }
 
 // The `pickleball` and `courts` entry points set this; bare `tennis` doesn't
-const DEFAULT_SPORTS = parseSports(
-	process.env.SF_DEFAULT_SPORT || "tennis",
-) ?? ["tennis"];
+const DEFAULT_SPORT = process.env.SF_DEFAULT_SPORT || "tennis";
+const DEFAULT_SPORTS = parseSports(DEFAULT_SPORT) ?? ["tennis"];
+// Which name we were invoked as, so help text and hints match
+const BIN =
+	DEFAULT_SPORT === "all" ? "courts" : (DEFAULT_SPORTS[0] ?? "tennis");
 
 program
-	.name("tennis")
+	.name(BIN)
 	.version(pkg.version)
 	.description("Find available SF tennis and pickleball court times near you")
 	.option(
@@ -70,7 +72,7 @@ program
 			if (!def || def.lat == null || def.lng == null) {
 				console.error(chalk.red("No default location set."));
 				console.error(
-					chalk.dim('Add one with: tennis location add <name> "<address>"'),
+					chalk.dim(`Add one with: ${BIN} location add <name> "<address>"`),
 				);
 				process.exit(1);
 			}
@@ -98,7 +100,7 @@ program
 			if (!loc || loc.lat == null || loc.lng == null) {
 				console.error(chalk.red(`Unknown location: "${locStr}".`));
 				console.error(
-					chalk.dim('Add it with: tennis location add <name> "<address>"'),
+					chalk.dim(`Add it with: ${BIN} location add <name> "<address>"`),
 				);
 				console.error(chalk.dim("Or use: -l current, -l lat,lng"));
 				process.exit(1);
@@ -166,10 +168,8 @@ program
 			console.log(chalk.yellow(`${errors} court(s) failed to load.`));
 		}
 
-		// Walk-up pickleball has no schedule to check — it's directory data
-		const walkUps = sports.includes("pickleball")
-			? await fetchWalkUpSpots(ref, opts.maxDistance)
-			: [];
+		// Walk-up courts have no schedule to check — it's directory data
+		const walkUps = await fetchWalkUpSpots(ref, sports, opts.maxDistance);
 
 		if (opts.json) {
 			console.log(JSON.stringify({ courts: results, walkUps }, null, 2));
@@ -178,7 +178,7 @@ program
 
 		if (results.length === 0) {
 			console.log(chalk.yellow("No courts found with available slots."));
-			printWalkUps(walkUps);
+			printWalkUps(walkUps, sports);
 			return;
 		}
 
@@ -189,15 +189,21 @@ program
 					? chalk.green(`${r.totalAvailableSlots} slots`)
 					: chalk.red("no slots");
 
-			const walkUpStr = r.walkUp?.courts
-				? chalk.dim(`  +${r.walkUp.courts} walk-up`)
+			const walkUpCourts = sports.reduce(
+				(n, s) => n + (r.walkUp?.[s]?.courts ?? 0),
+				0,
+			);
+			const walkUpStr = walkUpCourts
+				? chalk.dim(`  +${walkUpCourts} walk-up`)
 				: "";
 
 			const link = `\x1b]8;;${r.url}\x1b\\${r.name}\x1b]8;;\x1b\\`;
 			console.log(`${chalk.bold(link)} ${distStr} — ${slotsStr}${walkUpStr}`);
 			console.log(chalk.dim(`  ${r.address} · ${r.url}`));
-			if (r.walkUp?.openPlay)
-				console.log(chalk.dim(`  Open play: ${r.walkUp.openPlay}`));
+			for (const s of sports) {
+				const openPlay = r.walkUp?.[s]?.openPlay;
+				if (openPlay) console.log(chalk.dim(`  Open play: ${openPlay}`));
+			}
 
 			const sportRank = (s: Sport | null): number =>
 				s ? sports.indexOf(s) : sports.length;
@@ -238,33 +244,44 @@ program
 			console.log();
 		}
 
-		printWalkUps(walkUps);
+		printWalkUps(walkUps, sports);
 
 		console.log(
 			chalk.dim(`${results.length} courts shown. Book at https://www.rec.us`),
 		);
 	});
 
-function printWalkUps(spots: WalkUpResult[]): void {
+function printWalkUps(spots: WalkUpResult[], sports: Sport[]): void {
 	if (spots.length === 0) return;
-	console.log(chalk.bold("Walk-up pickleball — no booking"));
+	const what = sports.length === 1 ? sports[0] : "courts";
+	console.log(chalk.bold(`Walk-up ${what} — no booking`));
+
 	const width = Math.max(...spots.map((s) => s.name.length));
 	for (const s of spots) {
 		const dist = s.distance != null ? `${s.distance} mi` : "—";
-		const courts =
-			s.courts > 0
-				? `${s.courts} court${s.courts === 1 ? "" : "s"}`
-				: "open play only";
+		// With both sports in scope, say which courts are which
+		const counts = sports
+			.filter((sport) => s.walkUp[sport]?.courts)
+			.map((sport) => {
+				const n = s.walkUp[sport]?.courts ?? 0;
+				const noun = `court${n === 1 ? "" : "s"}`;
+				return sports.length === 1
+					? `${n} ${noun}`
+					: `${n} ${sportLabel(sport).toLowerCase()} ${noun}`;
+			});
 		const link = s.url
 			? `\x1b]8;;${s.url}\x1b\\${s.name}\x1b]8;;\x1b\\`
 			: s.name;
 		console.log(
-			`  ${link}${" ".repeat(width - s.name.length)}  ${chalk.dim(dist.padStart(7))}  ${courts}`,
+			`  ${link}${" ".repeat(width - s.name.length)}  ${chalk.dim(dist.padStart(7))}  ${counts.join(", ") || "open play only"}`,
 		);
-		if (s.openPlay)
-			console.log(
-				chalk.dim(`  ${" ".repeat(width)}  Open play: ${s.openPlay}`),
-			);
+		for (const sport of sports) {
+			const openPlay = s.walkUp[sport]?.openPlay;
+			if (openPlay)
+				console.log(
+					chalk.dim(`  ${" ".repeat(width)}  Open play: ${openPlay}`),
+				);
+		}
 	}
 	console.log();
 }
@@ -306,7 +323,7 @@ loc
 		if (locs.length === 0) {
 			console.log(
 				chalk.dim(
-					'No saved locations. Add one with: tennis location add <name> "<address>"',
+					`No saved locations. Add one with: ${BIN} location add <name> "<address>"`,
 				),
 			);
 			return;

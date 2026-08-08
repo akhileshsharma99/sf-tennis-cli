@@ -196,7 +196,17 @@ async function checkCourt(
 		if (!schedRes) continue;
 		const dateKey = date.replace(/-/g, "");
 
-		const dayCourts = (schedRes.dates?.[dateKey] ?? []).filter((c) => {
+		const allCourts = schedRes.dates?.[dateKey] ?? [];
+		// An unrecognizable payload must alert, not silently notify nothing
+		if (allCourts.length > 0 && !allCourts.some((c) => courtSport(c))) {
+			failures.push({
+				slug: court.slug,
+				name: court.name,
+				reason: `no recognized sport on any court (${date})`,
+			});
+			continue;
+		}
+		const dayCourts = allCourts.filter((c) => {
 			const sport = courtSport(c);
 			return sport != null && SPORTS.includes(sport);
 		});
@@ -287,7 +297,7 @@ async function reportFailures(
 	console.warn(`${failures.length}/${total} location(s) failed to load.`);
 
 	const sent = await notifyThrottled(dedupCache, FAILURE_ALERT_KEY, {
-		title: `Tennis check failed - ${failures.length}/${total} locations`,
+		title: `${SPORTS.map(sportLabel).join("/")} check failed - ${failures.length}/${total} locations`,
 		body: failures.map((f) => `${f.name}: ${f.reason}`).join("\n"),
 		tags: "warning",
 		priority: "high",
@@ -402,7 +412,7 @@ main().catch(async (e: Error) => {
 	const dedupCache = loadDedupCache();
 	if (
 		await notifyThrottled(dedupCache, CRASH_ALERT_KEY, {
-			title: "Tennis notifier crashed",
+			title: "Court notifier crashed",
 			body: e.message,
 			tags: "rotating_light",
 			priority: "high",

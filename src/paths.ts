@@ -19,3 +19,5 @@ function xdgCacheHome(): string {
 export const LOCATIONS_FILE = join(xdgConfigHome(), APP_NAME, "locations.json");
 
 export const COURTS_CACHE_FILE = join(xdgCacheHome(), APP_NAME, "courts.json");
+
+export const COORDS_CACHE_FILE = join(xdgCacheHome(), APP_NAME, "coords.json");

@@ -1,4 +1,4 @@
-import type { Court, WalkUp, WalkUpSpot } from "./courts";
+import type { Court, WalkUpBySport, WalkUpSpot } from "./courts";
 import { getCourts, getWalkUpSpots } from "./courts";
 import type { Coords } from "./geo";
 import { distanceMiles } from "./geo";
@@ -79,7 +79,7 @@ export interface CourtLocationResult {
 	distance: number;
 	url: string;
 	courts: CourtResult[];
-	walkUp?: WalkUp;
+	walkUp?: WalkUpBySport;
 	totalAvailableSlots: number;
 	totalPendingSlots: number;
 	opensAt: Date | null;
@@ -227,7 +227,11 @@ export function parseReservableSlots(
 
 /** Courts in a schedule response carry a real sport name; unknown sports drop out. */
 export function courtSport(c: ScheduleCourtDay): Sport | null {
-	return toSport(c.sports?.[0]?.name);
+	for (const s of c.sports ?? []) {
+		const sport = toSport(s.name);
+		if (sport) return sport;
+	}
+	return null;
 }
 
 async function fetchCourtData(
@@ -251,7 +255,13 @@ async function fetchCourtData(
 	}
 
 	const dateKey = date.replace(/-/g, "");
-	const todayCourts = (schedRes.dates?.[dateKey] ?? []).filter((c) => {
+	const dayCourts = schedRes.dates?.[dateKey] ?? [];
+	// If nothing is recognizable, the payload changed shape — that's a failure,
+	// not an empty result, or the whole run reports "no courts" and looks fine
+	if (dayCourts.length > 0 && !dayCourts.some((c) => courtSport(c))) {
+		return { ...court, error: "No recognized sport on any court" };
+	}
+	const todayCourts = dayCourts.filter((c) => {
 		const sport = courtSport(c);
 		return sport != null && sports.includes(sport);
 	});
@@ -400,15 +410,18 @@ export async function fetchAllCourts({
  */
 export async function fetchWalkUpSpots(
 	ref: Coords,
+	sports: Sport[],
 	maxDistance?: number,
 ): Promise<WalkUpResult[]> {
-	const spots = (await getWalkUpSpots()).map((spot) => ({
-		...spot,
-		distance:
-			spot.lat != null && spot.lng != null
-				? distanceMiles(ref, { lat: spot.lat, lng: spot.lng })
-				: null,
-	}));
+	const spots = (await getWalkUpSpots())
+		.filter((s) => sports.some((sport) => s.walkUp[sport]))
+		.map((spot) => ({
+			...spot,
+			distance:
+				spot.lat != null && spot.lng != null
+					? distanceMiles(ref, { lat: spot.lat, lng: spot.lng })
+					: null,
+		}));
 
 	return spots
 		.filter((s) =>

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	parseCourtsFromHtml,
-	parseCourtsFromTable,
+	parseDirectoryTable,
 	parseFacilityCoords,
 } from "../src/courts";
 
@@ -63,19 +63,24 @@ describe("parseCourtsFromHtml", () => {
 	});
 });
 
-describe("parseCourtsFromTable", () => {
-	const row = (
+describe("parseDirectoryTable", () => {
+	const pickleRow = (
 		facility: string,
 		{ slug = "", walkUp = "0", openPlay = "0" } = {},
 	) =>
-		`<tr><td data-label="Facility">${facility}</td><td data-label="ZIP code">94117</td><td data-label="Total courts">4</td>` +
+		`<tr><td data-label="Facility">${facility}</td><td data-label="Total courts">4</td>` +
 		`<td data-label="Reservable">${slug ? `<a href="https://www.rec.us/${slug}">4</a>` : "0"}</td>` +
 		`<td data-label="Walk-up shared use">${walkUp}</td>` +
 		`<td data-label="Dedicated open play">${openPlay}</td></tr>`;
 
-	test("parses the pickleball directory table", () => {
-		const html = `<table>${row('<a href="https://sfrecpark.org/x">Buena Vista</a>', { slug: "buenavista" })}${row("Rossi", { slug: "rossi" })}</table>`;
-		expect(parseCourtsFromTable(html)).toEqual({
+	const tennisRow = (facility: string, { slug = "", walkUp = "0" } = {}) =>
+		`<tr><td data-label="Facility">${facility}</td><td data-label="Total courts">4</td>` +
+		`<td data-label="Reservable courts">${slug ? `<a href="https://www.rec.us/${slug}">4</a>` : "0"}</td>` +
+		`<td data-label="Walk-up courts">${walkUp}</td></tr>`;
+
+	test("parses bookable rows from the pickleball table", () => {
+		const html = `<table>${pickleRow('<a href="https://sfrecpark.org/x">Buena Vista</a>', { slug: "buenavista" })}${pickleRow("Rossi", { slug: "rossi" })}</table>`;
+		expect(parseDirectoryTable(html, "pickleball")).toEqual({
 			courts: [
 				{ slug: "buenavista", name: "Buena Vista", sports: ["pickleball"] },
 				{ slug: "rossi", name: "Rossi", sports: ["pickleball"] },
@@ -84,37 +89,44 @@ describe("parseCourtsFromTable", () => {
 		});
 	});
 
+	test("reads the tennis table's differently-named walk-up column", () => {
+		const html = `<table>${tennisRow("Dolores", { slug: "dolores", walkUp: "3" })}</table>`;
+		expect(parseDirectoryTable(html, "tennis").courts).toEqual([
+			{
+				slug: "dolores",
+				name: "Dolores",
+				sports: ["tennis"],
+				walkUp: { tennis: { courts: 3, openPlay: null } },
+			},
+		]);
+	});
+
 	test("decodes entities and collapses whitespace in facility names", () => {
-		const html = `<table>${row("St. Mary&#39;s\n  Rec", { slug: "stmarys" })}</table>`;
-		expect(parseCourtsFromTable(html).courts).toEqual([
+		const html = `<table>${pickleRow("St. Mary&#39;s\n  Rec", { slug: "stmarys" })}</table>`;
+		expect(parseDirectoryTable(html, "pickleball").courts).toEqual([
 			{ slug: "stmarys", name: "St. Mary's Rec", sports: ["pickleball"] },
 		]);
 	});
 
-	test("returns nothing for the tennis page's non-table layout", () => {
+	test("returns nothing for a page with no table", () => {
 		const html = `<a href="https://www.rec.us/alicemarble" aria-label="Reserve 4 courts at Alice Marble">4</a>`;
-		expect(parseCourtsFromTable(html)).toEqual({
+		expect(parseDirectoryTable(html, "tennis")).toEqual({
 			courts: [],
 			walkUpSpots: [],
 		});
 	});
 
-	test("attaches walk-up info to bookable locations", () => {
-		const html = `<table>${row("Rossi", { slug: "rossi", walkUp: "4", openPlay: "See schedule" })}</table>`;
-		expect(parseCourtsFromTable(html).courts).toEqual([
-			{
-				slug: "rossi",
-				name: "Rossi",
-				sports: ["pickleball"],
-				walkUp: { courts: 4, openPlay: "See schedule" },
-			},
-		]);
+	test("keys walk-up info by sport on bookable locations", () => {
+		const html = `<table>${pickleRow("Rossi", { slug: "rossi", walkUp: "4", openPlay: "See schedule" })}</table>`;
+		expect(parseDirectoryTable(html, "pickleball").courts[0].walkUp).toEqual({
+			pickleball: { courts: 4, openPlay: "See schedule" },
+		});
 	});
 
 	test("collects walk-up-only parks with their facility link", () => {
 		const facility = `<a href="https://sfrecpark.org/Facilities/Facility/Details/Alta-Plaza-Park-147">Alta Plaza</a>`;
-		const html = `<table>${row(facility, { walkUp: "2" })}</table>`;
-		expect(parseCourtsFromTable(html)).toEqual({
+		const html = `<table>${tennisRow(facility, { walkUp: "3" })}</table>`;
+		expect(parseDirectoryTable(html, "tennis")).toEqual({
 			courts: [],
 			walkUpSpots: [
 				{
@@ -122,25 +134,28 @@ describe("parseCourtsFromTable", () => {
 					url: "https://sfrecpark.org/Facilities/Facility/Details/Alta-Plaza-Park-147",
 					lat: null,
 					lng: null,
-					courts: 2,
-					openPlay: null,
+					walkUp: { tennis: { courts: 3, openPlay: null } },
 				},
 			],
 		});
 	});
 
 	test("counts a numeric open-play cell as courts, not prose", () => {
-		const html = `<table>${row("Larsen", { openPlay: "8" })}${row("Rossi", { slug: "rossi", walkUp: "4", openPlay: "2" })}</table>`;
-		const { courts, walkUpSpots } = parseCourtsFromTable(html);
-		expect(walkUpSpots.map((s) => [s.name, s.courts, s.openPlay])).toEqual([
-			["Larsen", 8, null],
-		]);
-		expect(courts[0].walkUp).toEqual({ courts: 6, openPlay: null });
+		const html = `<table>${pickleRow("Larsen", { openPlay: "8" })}${pickleRow("Rossi", { slug: "rossi", walkUp: "4", openPlay: "2" })}</table>`;
+		const { courts, walkUpSpots } = parseDirectoryTable(html, "pickleball");
+		expect(walkUpSpots[0].walkUp.pickleball).toEqual({
+			courts: 8,
+			openPlay: null,
+		});
+		expect(courts[0].walkUp?.pickleball).toEqual({
+			courts: 6,
+			openPlay: null,
+		});
 	});
 
 	test("drops rows with neither reservable nor walk-up play", () => {
-		const html = `<table>${row("Goldman Tennis Center")}</table>`;
-		expect(parseCourtsFromTable(html)).toEqual({
+		const html = `<table>${pickleRow("Goldman Tennis Center")}</table>`;
+		expect(parseDirectoryTable(html, "pickleball")).toEqual({
 			courts: [],
 			walkUpSpots: [],
 		});
