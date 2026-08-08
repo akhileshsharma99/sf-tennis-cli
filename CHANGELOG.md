@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/akhileshsharma99/sf-tennis-cli/compare/v1.1.1...v1.2.0) (2026-08-08)
+
+
+### Features
+
+* notify on court load failures and crashes ([0c1e451](https://github.com/akhileshsharma99/sf-tennis-cli/commit/0c1e451b4ae6dbd9c66b391ebc13e93872bef546))
+
+
+### Bug Fixes
+
+* adapt to rec.us HTML and schedule API changes ([4172288](https://github.com/akhileshsharma99/sf-tennis-cli/commit/4172288353d87e6800cc910327d6e71ac27a10bd))
+* address code review findings in notify pipeline and parsers ([64f2e49](https://github.com/akhileshsharma99/sf-tennis-cli/commit/64f2e493951bf650e918227185105863aa05f862))
+
 ## [1.1.1](https://github.com/akhileshsharma99/sf-tennis-cli/compare/v1.1.0...v1.1.1) (2026-08-08)
 
 
