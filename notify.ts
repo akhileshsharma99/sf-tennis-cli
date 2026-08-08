@@ -44,6 +44,16 @@ interface GroupedNotification {
 	lines: string[];
 }
 
+interface CourtFailure {
+	name: string;
+	reason: string;
+}
+
+interface CourtCheckResult {
+	notifications: SlotNotification[];
+	failures: CourtFailure[];
+}
+
 type DedupCache = Record<string, number>;
 
 const HOME_LAT = parseFloat(process.env.HOME_LAT || "");
@@ -55,6 +65,9 @@ const PREF_DAYS = (process.env.PREF_DAYS || "2,4").split(",").map(Number); // 0=
 const PREF_START = parseInt(process.env.PREF_START_HOUR || "17", 10);
 const PREF_END = parseInt(process.env.PREF_END_HOUR || "19", 10);
 const WINDOW_ALERT_MINS = 20;
+
+const FAILURE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const FAILURE_ALERT_KEY = "alert:court-failures";
 
 if (!HOME_LAT || !HOME_LNG || !NTFY_TOPIC) {
 	console.error("Missing required env vars: HOME_LAT, HOME_LNG, NTFY_TOPIC");
@@ -131,14 +144,19 @@ async function notify({
 async function checkCourt(
 	court: Court,
 	dates: string[],
-): Promise<SlotNotification[]> {
+): Promise<CourtCheckResult> {
 	const notifications: SlotNotification[] = [];
 
 	const locData = await fetchLocationData(court.slug);
-	if (!locData) return notifications;
+	if (!locData) {
+		return {
+			notifications,
+			failures: [{ name: court.name, reason: "location unavailable" }],
+		};
+	}
 
 	const dist = distanceMiles(HOME, locData);
-	if (dist > MAX_DISTANCE) return notifications;
+	if (dist > MAX_DISTANCE) return { notifications, failures: [] };
 
 	const now = new Date();
 
@@ -150,6 +168,13 @@ async function checkCourt(
 			return { date, schedRes };
 		}),
 	);
+
+	if (schedResults.every(({ schedRes }) => !schedRes)) {
+		return {
+			notifications,
+			failures: [{ name: court.name, reason: "schedule unavailable" }],
+		};
+	}
 
 	for (const { date, schedRes } of schedResults) {
 		if (!schedRes) continue;
@@ -203,7 +228,36 @@ async function checkCourt(
 		}
 	}
 
-	return notifications;
+	return { notifications, failures: [] };
+}
+
+function runUrl(): string {
+	const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
+	return GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
+		? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
+		: "https://www.rec.us";
+}
+
+async function reportFailures(
+	failures: CourtFailure[],
+	total: number,
+	dedupCache: DedupCache,
+): Promise<void> {
+	if (failures.length === 0) return;
+	console.warn(`${failures.length}/${total} location(s) failed to load.`);
+
+	const lastAlert = dedupCache[FAILURE_ALERT_KEY] ?? 0;
+	if (Date.now() - lastAlert < FAILURE_ALERT_COOLDOWN_MS) return;
+
+	await notify({
+		title: `Tennis check failed - ${failures.length}/${total} locations`,
+		body: failures.map((f) => `${f.name}: ${f.reason}`).join("\n"),
+		tags: "warning",
+		priority: "high",
+		click: runUrl(),
+	});
+	dedupCache[FAILURE_ALERT_KEY] = Date.now();
+	console.log("Sent failure alert.");
 }
 
 async function main(): Promise<void> {
@@ -216,24 +270,32 @@ async function main(): Promise<void> {
 	console.log(`Checking ${courts.length} locations...`);
 
 	const notifications: SlotNotification[] = [];
+	const failures: CourtFailure[] = [];
 
 	for (let i = 0; i < courts.length; i += 5) {
 		const batch = courts.slice(i, i + 5);
 		const results = await Promise.all(
 			batch.map((c) =>
-				checkCourt(c, dates).catch((e: Error) => {
+				checkCourt(c, dates).catch((e: Error): CourtCheckResult => {
 					console.warn(`  [error] ${c.name}: ${e.message}`);
-					return [] as SlotNotification[];
+					return {
+						notifications: [],
+						failures: [{ name: c.name, reason: e.message }],
+					};
 				}),
 			),
 		);
-		notifications.push(...results.flat());
+		for (const r of results) {
+			notifications.push(...r.notifications);
+			failures.push(...r.failures);
+		}
 	}
 
 	const dedupKeys = (n: SlotNotification): string[] =>
 		n._slotKeys || (n._dedupKey ? [n._dedupKey] : []);
 
 	const dedupCache = loadDedupCache();
+	await reportFailures(failures, courts.length, dedupCache);
 	const fresh = notifications.filter((n) =>
 		dedupKeys(n).some((k) => !dedupCache[k]),
 	);
@@ -286,7 +348,14 @@ async function main(): Promise<void> {
 	console.log("Done.");
 }
 
-main().catch((e: Error) => {
+main().catch(async (e: Error) => {
 	console.error(e);
+	await notify({
+		title: "Tennis notifier crashed",
+		body: e.message,
+		tags: "rotating_light",
+		priority: "high",
+		click: runUrl(),
+	}).catch(() => {});
 	process.exit(1);
 });

@@ -102,6 +102,7 @@ gh workflow run notify.yml
 - **Window opening alerts** (urgent): Notifies when a court's booking window opens within the next 20 minutes, so you can race to book
 - **Available slot alerts**: Notifies when open slots match your day/time/distance preferences (catches cancellations), batched by day and location
 - Deduplication via local cache (24h TTL) — each slot only notifies once
+- **Failure alerts**: If any location fails to load (or the run crashes), you get one notification listing every failure, at most once every 6 hours — so a broken scraper doesn't fail silently
 
 ## Data Source
 
