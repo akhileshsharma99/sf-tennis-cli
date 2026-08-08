@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 import type { ScheduleResponse, TimeSlot } from "./src/api";
 import {
 	computeReleaseDate,
+	courtSport,
 	DEFAULT_COURT_META,
 	fetchJson,
 	fetchLocationData,
@@ -21,6 +22,8 @@ import { getCourts } from "./src/courts";
 import { formatDateLabel } from "./src/format";
 import { readJson, writeJson } from "./src/fs-utils";
 import { distanceMiles } from "./src/geo";
+import type { Sport } from "./src/sports";
+import { ALL_SPORTS, parseSports, sportLabel } from "./src/sports";
 
 interface NotifyParams {
 	title: string;
@@ -67,6 +70,7 @@ const MAX_DISTANCE = parseFloat(process.env.MAX_DISTANCE || "2");
 const PREF_DAYS = (process.env.PREF_DAYS || "2,4").split(",").map(Number); // 0=Sun, 2=Tue, 4=Thu
 const PREF_START = parseInt(process.env.PREF_START_HOUR || "17", 10);
 const PREF_END = parseInt(process.env.PREF_END_HOUR || "19", 10);
+const SPORTS: Sport[] = parseSports(process.env.SPORTS || "all") ?? ALL_SPORTS;
 const WINDOW_ALERT_MINS = 20;
 
 const FAILURE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
@@ -192,8 +196,12 @@ async function checkCourt(
 		if (!schedRes) continue;
 		const dateKey = date.replace(/-/g, "");
 
-		const dayCourts = schedRes.dates?.[dateKey] ?? [];
+		const dayCourts = (schedRes.dates?.[dateKey] ?? []).filter((c) => {
+			const sport = courtSport(c);
+			return sport != null && SPORTS.includes(sport);
+		});
 		for (const c of dayCourts) {
+			const sport = courtSport(c) as Sport;
 			const meta = locData.courtMeta[c.courtNumber] || DEFAULT_COURT_META;
 			const releaseDate = computeReleaseDate(date, meta);
 
@@ -213,25 +221,28 @@ async function checkCourt(
 				.map((s) => `${s.start}-${s.end}`)
 				.join(", ");
 			const courtUrl = `https://www.rec.us/${court.slug}`;
+			// Only name the sport when the run covers more than one
+			const suffix = SPORTS.length > 1 ? ` (${sportLabel(sport)})` : "";
+			const sportTag = sport === "pickleball" ? "ping_pong" : "tennis";
 
 			if (windowOpeningSoon) {
 				const minsLeft = Math.round(minsUntilOpen);
 				notifications.push({
-					title: `${dateLabel} - ${court.name} opens in ${minsLeft} min!`,
+					title: `${dateLabel} - ${court.name}${suffix} opens in ${minsLeft} min!`,
 					body: `${c.courtNumber}: ${timesStr}`,
-					tags: "alarm_clock,tennis",
+					tags: `alarm_clock,${sportTag}`,
 					priority: "urgent",
 					click: courtUrl,
 					_dedupKey: `${court.slug}:${c.courtNumber}:${date}:window`,
 				});
 			} else if (windowOpen) {
 				notifications.push({
-					title: `${dateLabel} - ${court.name}`,
+					title: `${dateLabel} - ${court.name}${suffix}`,
 					body: `${c.courtNumber}: ${timesStr}`,
-					tags: "tennis",
+					tags: sportTag,
 					priority: "default",
 					click: courtUrl,
-					_groupKey: `${date}:${court.slug}`,
+					_groupKey: `${date}:${court.slug}:${sport}`,
 					_slotKeys: matchingSlots.map(
 						(s) => `${court.slug}:${c.courtNumber}:${date}:${s.start}`,
 					),
@@ -292,8 +303,12 @@ async function main(): Promise<void> {
 		return;
 	}
 	const dedupCache = loadDedupCache();
-	const courts = await getCourts();
-	console.log(`Checking ${courts.length} locations...`);
+	const courts = (await getCourts()).filter((c) =>
+		c.sports.some((s) => SPORTS.includes(s)),
+	);
+	console.log(
+		`Checking ${courts.length} locations for ${SPORTS.join(", ")}...`,
+	);
 
 	const notifications: SlotNotification[] = [];
 	const failures: CourtFailure[] = [];

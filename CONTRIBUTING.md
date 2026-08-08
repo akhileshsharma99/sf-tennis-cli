@@ -4,20 +4,24 @@
 
 ```bash
 bun install
-bun link  # makes `tennis` available globally
+bun link  # makes `tennis`, `pickleball`, and `courts` available globally
 ```
 
 ## Project Structure
 
 ```
 ├── cli.ts              CLI entry point
+├── bin/                Alias entry points that set SF_DEFAULT_SPORT
+│   ├── pickleball.ts
+│   └── courts.ts
 ├── notify.ts           GitHub Actions notification script
 ├── src/
 │   ├── api.ts          rec.us API client + shared helpers
 │   ├── courts.ts       Court list (fetched from sfrecpark.org, with fallback)
 │   ├── fs-utils.ts     readJson/writeJson utilities
 │   ├── geo.ts          Haversine distance + geocoding
-│   └── locations.ts    Saved location management
+│   ├── locations.ts    Saved location management
+│   └── sports.ts       Sport union + parsing
 ├── .github/workflows/
 │   └── notify.yml      Cron notification workflow
 └── (user data)         ~/.config/sf-tennis-cli/locations.json
@@ -25,7 +29,12 @@ bun link  # makes `tennis` available globally
 
 ## Court List
 
-The court list is fetched dynamically from [sfrecpark.org](https://sfrecpark.org/1446/Reservable-Tennis-Courts) at runtime. New courts added by SF Rec & Park are picked up automatically.
+The court list is fetched dynamically at runtime from two sfrecpark.org pages and merged by slug, so new courts are picked up automatically:
+
+- [Tennis Court Directory](https://sfrecpark.org/1446/Reservable-Tennis-Courts) — aria-label links, parsed by `parseCourtsFromHtml`
+- [Pickleball Court Directory](https://sfrecpark.org/1772/Pickleball-Court-Directory) — an HTML table, parsed by `parseCourtsFromTable`
+
+These tags are only used to skip locations that can't have the requested sport. The authoritative per-court sport comes from the schedule API's `sports[].name`. If the pickleball page fails to load, the run degrades to tennis-only rather than erroring.
 
 ## How the API Works
 

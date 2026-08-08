@@ -16,19 +16,27 @@ import {
 	removeLocation,
 	setDefaultLocation,
 } from "./src/locations";
+import type { Sport } from "./src/sports";
+import { parseSports, sportLabel } from "./src/sports";
 
 interface CliOptions {
 	date?: string;
 	location?: string;
 	range?: string;
+	sport?: string;
 	maxDistance?: number;
 	json?: boolean;
 }
 
+// The `pickleball` and `courts` entry points set this; bare `tennis` doesn't
+const DEFAULT_SPORTS = parseSports(
+	process.env.SF_DEFAULT_SPORT || "tennis",
+) ?? ["tennis"];
+
 program
 	.name("tennis")
 	.version(pkg.version)
-	.description("Find available SF tennis court times near you")
+	.description("Find available SF tennis and pickleball court times near you")
 	.option(
 		"-d, --date <date>",
 		'date: YYYY-MM-DD, day name (thursday, th), "tomorrow", "today" (default: today)',
@@ -40,6 +48,10 @@ program
 	.option(
 		"-r, --range <start-end>",
 		'time range filter, e.g. "9-17" for 9am-5pm',
+	)
+	.option(
+		"-s, --sport <sport>",
+		`tennis, pickleball, or all (default: ${DEFAULT_SPORTS.join(",")})`,
 	)
 	.option("-m, --max-distance <miles>", "max distance in miles", parseFloat)
 	.option("--json", "output raw JSON")
@@ -94,6 +106,20 @@ program
 			refLabel = `${loc.name} (${loc.address})`;
 		}
 
+		let sports: Sport[] = DEFAULT_SPORTS;
+		if (opts.sport) {
+			const parsed = parseSports(opts.sport);
+			if (!parsed) {
+				console.error(
+					chalk.red(
+						`Invalid sport: "${opts.sport}". Use tennis, pickleball, or all.`,
+					),
+				);
+				process.exit(1);
+			}
+			sports = parsed;
+		}
+
 		let timeRange: [number, number] | null = null;
 		if (opts.range) {
 			const parts = opts.range.split("-").map(Number);
@@ -111,7 +137,9 @@ program
 			}
 		}
 
-		console.log(chalk.bold(`\nTennis Courts — ${date}`));
+		const heading =
+			sports.length === 1 ? `${sportLabel(sports[0])} Courts` : "Courts";
+		console.log(chalk.bold(`\n${heading} — ${date}`));
 		console.log(chalk.dim(`From: ${refLabel}`));
 		if (opts.maxDistance)
 			console.log(chalk.dim(`Within: ${opts.maxDistance} mi`));
@@ -127,6 +155,7 @@ program
 		const { courts: results, errors } = await fetchAllCourts({
 			date,
 			ref,
+			sports,
 			maxDistance: opts.maxDistance,
 			timeRange,
 		});
@@ -157,14 +186,29 @@ program
 			console.log(`${chalk.bold(link)} ${distStr} — ${slotsStr}`);
 			console.log(chalk.dim(`  ${r.address} · ${r.url}`));
 
-			for (const court of r.courts) {
-				if (court.available.length === 0 && court.pendingSlots.length === 0)
-					continue;
+			const sportRank = (s: Sport | null): number =>
+				s ? sports.indexOf(s) : sports.length;
+			const shown = r.courts
+				.filter((c) => c.available.length > 0 || c.pendingSlots.length > 0)
+				.sort((a, b) => sportRank(a.sport) - sportRank(b.sport));
+			// Only label sports when this location contributes more than one
+			const groupBySport =
+				new Set(shown.map((c) => c.sport ?? "other")).size > 1;
+			let lastSport: string | null = null;
+			const indent = groupBySport ? "    " : "  ";
+
+			for (const court of shown) {
+				if (groupBySport && court.sport !== lastSport) {
+					lastSport = court.sport;
+					console.log(
+						chalk.cyan(`  ${court.sport ? sportLabel(court.sport) : "Other"}`),
+					);
+				}
 				if (court.available.length > 0) {
 					const times = court.available
 						.map((s) => chalk.green(`${s.start}–${s.end}`))
 						.join(", ");
-					console.log(`  ${court.courtNumber}: ${times}`);
+					console.log(`${indent}${court.courtNumber}: ${times}`);
 				}
 				if (court.pendingSlots.length > 0 && court.opensAt) {
 					const opensStr = formatOpensAt(court.opensAt);
@@ -173,7 +217,7 @@ program
 						.join(", ");
 					console.log(
 						chalk.yellow(
-							`  ${court.courtNumber}: ${pendingTimes} (opens ${opensStr})`,
+							`${indent}${court.courtNumber}: ${pendingTimes} (opens ${opensStr})`,
 						),
 					);
 				}

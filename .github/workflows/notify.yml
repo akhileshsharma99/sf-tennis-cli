@@ -29,6 +29,7 @@ jobs:
           HOME_LNG: ${{ secrets.HOME_LNG }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           MAX_DISTANCE: ${{ vars.MAX_DISTANCE }}
+          SPORTS: ${{ vars.SPORTS }}
           PREF_DAYS: ${{ vars.PREF_DAYS }}
           PREF_START_HOUR: ${{ vars.PREF_START_HOUR }}
           PREF_END_HOUR: ${{ vars.PREF_END_HOUR }}

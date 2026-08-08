@@ -1,6 +1,16 @@
-# SF Rec & Park Tennis Availability CLI
+# SF Rec & Park Court Availability CLI
 
-CLI to find available tennis court times across all 27 SF Rec & Park courts. Fetches real-time availability from [rec.us](https://www.rec.us) and sorts by distance from your location. Optionally, get push notifications via [ntfy.sh](https://ntfy.sh) when courts matching your day/time/distance preferences open up — runs on GitHub Actions every 15 minutes.
+CLI to find available tennis and pickleball court times across all 28 SF Rec & Park locations. Fetches real-time availability from [rec.us](https://www.rec.us) and sorts by distance from your location. Optionally, get push notifications via [ntfy.sh](https://ntfy.sh) when courts matching your day/time/distance preferences open up — runs on GitHub Actions every 15 minutes.
+
+Installs three names for the same tool, differing only in which sport they default to:
+
+| Command      | Default sport            |
+| ------------ | ------------------------ |
+| `tennis`     | tennis                   |
+| `pickleball` | pickleball               |
+| `courts`     | both, grouped by sport   |
+
+`--sport` overrides the default on any of them.
 
 ## Install
 
@@ -30,15 +40,22 @@ Addresses are automatically geocoded via the US Census Bureau API (free, no key 
 ## Usage
 
 ```bash
-tennis                          # courts near your default location, today
+tennis                          # tennis courts near your default location, today
+pickleball                      # pickleball courts, same defaults
+courts                          # both sports, grouped by sport
 tennis -l work                  # courts near your "work" location
 tennis -l current               # courts near your current IP location
 tennis -m 1.5                   # only courts within 1.5 miles
 tennis -r 9-17                  # only slots between 9am-5pm
 tennis -d 2026-03-25            # check a specific date
 tennis -m 2 -r 17-21            # evening slots within 2 miles
+tennis -s pickleball            # override the default sport
+courts -s tennis                # ...in either direction
 tennis --json                   # raw JSON output
 ```
+
+Locations that only have one of the two sports print a flat court list; where a
+location offers both, courts are grouped under a `Tennis` / `Pickleball` heading.
 
 ### Manage locations
 
@@ -57,6 +74,7 @@ tennis location default <name>  # set default location
 | `-d, --date <YYYY-MM-DD>`    | Date to check (default: today)                                    |
 | `-l, --location <name>`      | Saved location name or `current` (default: your default location) |
 | `-r, --range <start-end>`    | Time range filter in 24h, e.g. `9-17`                             |
+| `-s, --sport <sport>`        | `tennis`, `pickleball`, or `all` (default: depends on the command) |
 | `-m, --max-distance <miles>` | Max distance in miles                                             |
 | `--json`                     | Output raw JSON                                                   |
 
@@ -87,6 +105,7 @@ bun notify.ts                # run locally
 | Variable | Default | Description |
 |---|---|---|
 | `MAX_DISTANCE` | `2` | Miles radius from home |
+| `SPORTS` | `all` | `tennis`, `pickleball`, `all`, or a comma list |
 | `PREF_DAYS` | `2,4` | Days of week (0=Sun, 1=Mon, 2=Tue, ..., 6=Sat) |
 | `PREF_START_HOUR` | `17` | Start of preferred time window (24h) |
 | `PREF_END_HOUR` | `19` | End of preferred time window (24h) |
@@ -106,4 +125,4 @@ gh workflow run notify.yml
 
 ## Data Source
 
-All court data comes from the [SF Rec & Park](https://www.rec.us) booking system API. Addresses are geocoded via the [US Census Bureau Geocoder](https://geocoding.geo.census.gov/).
+All court data comes from the [SF Rec & Park](https://www.rec.us) booking system API. The location list is scraped from the [Tennis Court Directory](https://sfrecpark.org/1446/Reservable-Tennis-Courts) and [Pickleball Court Directory](https://sfrecpark.org/1772/Pickleball-Court-Directory) (cached 24h); the sport of each individual court comes from the rec.us schedule API. Addresses are geocoded via the [US Census Bureau Geocoder](https://geocoding.geo.census.gov/).

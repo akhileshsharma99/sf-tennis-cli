@@ -1,10 +1,12 @@
 {
 	"name": "sf-tennis-cli",
 	"version": "1.2.0",
-	"description": "Find available tennis court times near you in SF",
+	"description": "Find available tennis and pickleball court times near you in SF",
 	"type": "module",
 	"bin": {
-		"tennis": "./cli.ts"
+		"tennis": "./cli.ts",
+		"pickleball": "./bin/pickleball.ts",
+		"courts": "./bin/courts.ts"
 	},
 	"scripts": {
 		"start": "bun cli.ts",

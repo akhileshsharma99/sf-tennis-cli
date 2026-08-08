@@ -2,6 +2,8 @@ import type { Court } from "./courts";
 import { getCourts } from "./courts";
 import type { Coords } from "./geo";
 import { distanceMiles } from "./geo";
+import type { Sport } from "./sports";
+import { toSport } from "./sports";
 
 const API_BASE = "https://api.rec.us/v1/locations";
 const REC_US_BASE = "https://www.rec.us";
@@ -11,7 +13,8 @@ export interface RecUsLocationCourt {
 	maxReservationTime?: string;
 	defaultReservationWindowDays?: number;
 	reservationReleaseTimeLocal?: string;
-	sports?: Array<{ name: string }>;
+	// This endpoint gives only sportId; names come from the schedule response
+	sports?: Array<{ sportId: string }>;
 }
 
 export interface RecUsLocation {
@@ -58,6 +61,7 @@ export interface TimeSlot {
 
 interface CourtResult {
 	courtNumber: string;
+	sport: Sport | null;
 	sports: string[] | undefined;
 	available: TimeSlot[];
 	booked: TimeSlot[];
@@ -89,6 +93,7 @@ interface CourtLocationError {
 interface FetchAllCourtsOptions {
 	date: string;
 	ref: Coords;
+	sports: Sport[];
 	maxDistance?: number;
 	timeRange?: [number, number] | null;
 }
@@ -214,10 +219,16 @@ export function parseReservableSlots(
 	return slots;
 }
 
+/** Courts in a schedule response carry a real sport name; unknown sports drop out. */
+export function courtSport(c: ScheduleCourtDay): Sport | null {
+	return toSport(c.sports?.[0]?.name);
+}
+
 async function fetchCourtData(
 	court: Court,
 	date: string,
 	ref: Coords,
+	sports: Sport[],
 ): Promise<CourtLocationResult | CourtLocationError> {
 	const locData = await fetchLocationData(court.slug);
 	if (!locData) {
@@ -234,7 +245,10 @@ async function fetchCourtData(
 	}
 
 	const dateKey = date.replace(/-/g, "");
-	const todayCourts = schedRes.dates?.[dateKey] ?? [];
+	const todayCourts = (schedRes.dates?.[dateKey] ?? []).filter((c) => {
+		const sport = courtSport(c);
+		return sport != null && sports.includes(sport);
+	});
 	const now = new Date();
 	const courts: CourtResult[] = todayCourts.map((c) => {
 		const meta = locData.courtMeta[c.courtNumber] || DEFAULT_COURT_META;
@@ -253,6 +267,7 @@ async function fetchCourtData(
 		}
 		return {
 			courtNumber: c.courtNumber,
+			sport: courtSport(c),
 			sports: c.sports?.map((s) => s.name),
 			available,
 			booked,
@@ -298,16 +313,21 @@ function isCourtLocationResult(
 export async function fetchAllCourts({
 	date,
 	ref,
+	sports,
 	maxDistance,
 	timeRange,
 }: FetchAllCourtsOptions): Promise<FetchAllCourtsResult> {
-	const courts = await getCourts();
+	// Skip locations that don't list any requested sport — pickleball-only runs
+	// hit ~10 locations instead of all 28
+	const courts = (await getCourts()).filter((c) =>
+		c.sports.some((s) => sports.includes(s)),
+	);
 	const results: (CourtLocationResult | CourtLocationError)[] = [];
 	for (let i = 0; i < courts.length; i += 5) {
 		const batch = courts.slice(i, i + 5);
 		const batchResults = await Promise.all(
 			batch.map((court) =>
-				fetchCourtData(court, date, ref).catch(
+				fetchCourtData(court, date, ref, sports).catch(
 					(): CourtLocationError => ({
 						...court,
 						error: "fetch failed",
@@ -319,7 +339,9 @@ export async function fetchAllCourts({
 	}
 
 	const errors = results.filter((r) => !isCourtLocationResult(r));
-	let filtered = results.filter(isCourtLocationResult);
+	let filtered = results
+		.filter(isCourtLocationResult)
+		.filter((r) => r.courts.length > 0);
 
 	if (maxDistance != null) {
 		filtered = filtered.filter((r) => r.distance <= maxDistance);
