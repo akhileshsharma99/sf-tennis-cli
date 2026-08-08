@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/akhileshsharma99/sf-tennis-cli/compare/v1.1.0...v1.1.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* store user data outside Bun binary filesystem ([bc80a35](https://github.com/akhileshsharma99/sf-tennis-cli/commit/bc80a358055ff8c663a43d72bfd2fe5fedfa19b7))
+
 ## [1.1.0](https://github.com/akhileshsharma99/sf-tennis-cli/compare/v1.0.0...v1.1.0) (2026-03-29)
 
 

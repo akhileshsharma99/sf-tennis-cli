@@ -1,6 +1,6 @@
 {
 	"name": "sf-tennis-cli",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"description": "Find available tennis court times near you in SF",
 	"type": "module",
 	"bin": {
