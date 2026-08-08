@@ -1,5 +1,5 @@
-import type { Court } from "./courts";
-import { getCourts } from "./courts";
+import type { Court, WalkUp, WalkUpSpot } from "./courts";
+import { getCourts, getWalkUpSpots } from "./courts";
 import type { Coords } from "./geo";
 import { distanceMiles } from "./geo";
 import type { Sport } from "./sports";
@@ -79,9 +79,15 @@ export interface CourtLocationResult {
 	distance: number;
 	url: string;
 	courts: CourtResult[];
+	walkUp?: WalkUp;
 	totalAvailableSlots: number;
 	totalPendingSlots: number;
 	opensAt: Date | null;
+}
+
+/** A walk-up park with its distance from the reference point resolved. */
+export interface WalkUpResult extends WalkUpSpot {
+	distance: number | null;
 }
 
 interface CourtLocationError {
@@ -298,6 +304,7 @@ async function fetchCourtData(
 		distance: dist,
 		url: `${REC_US_BASE}/${court.slug}`,
 		courts,
+		...(court.walkUp ? { walkUp: court.walkUp } : {}),
 		totalAvailableSlots: courts.reduce((n, c) => n + c.available.length, 0),
 		totalPendingSlots,
 		opensAt: earliestOpensAt,
@@ -385,6 +392,31 @@ export async function fetchAllCourts({
 	filtered.sort((a, b) => a.distance - b.distance);
 
 	return { courts: filtered, errors: errors.length };
+}
+
+/**
+ * Walk-up parks, nearest first. Spots whose coordinates couldn't be resolved
+ * sort last and are dropped when a distance limit is given.
+ */
+export async function fetchWalkUpSpots(
+	ref: Coords,
+	maxDistance?: number,
+): Promise<WalkUpResult[]> {
+	const spots = (await getWalkUpSpots()).map((spot) => ({
+		...spot,
+		distance:
+			spot.lat != null && spot.lng != null
+				? distanceMiles(ref, { lat: spot.lat, lng: spot.lng })
+				: null,
+	}));
+
+	return spots
+		.filter((s) =>
+			maxDistance == null
+				? true
+				: s.distance != null && s.distance <= maxDistance,
+		)
+		.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity));
 }
 
 export function parseHour(time: string | undefined): number | null {

@@ -57,6 +57,29 @@ tennis --json                   # raw JSON output
 Locations that only have one of the two sports print a flat court list; where a
 location offers both, courts are grouped under a `Tennis` / `Pickleball` heading.
 
+### Walk-up pickleball
+
+Whenever pickleball is in scope, output ends with the walk-up courts you can
+just turn up and play — first-come-first-served or dedicated open play, no
+booking. Bookable locations that also have walk-up courts show a `+N walk-up`
+note, and any open-play hours are printed verbatim from the directory.
+
+```
+Rossi  2.25 mi — 9 slots  +4 walk-up
+  600 Arguello Blvd · https://www.rec.us/rossi
+  Open play: See schedule
+  Court A: 15:00–16:30
+
+Walk-up pickleball — no booking
+  Alta Plaza                 0.78 mi  2 courts
+  Willie "Woo Woo" Wong      0.94 mi  1 court
+  States Street (Flint St)    2.5 mi  2 courts
+```
+
+These parks aren't on rec.us, so there's no availability to check and nothing to
+notify on. Their coordinates come from their sfrecpark.org facility page and are
+cached with the court list; `--max-distance` applies to them too.
+
 ### Manage locations
 
 ```bash

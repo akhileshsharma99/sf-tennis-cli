@@ -4,7 +4,8 @@ import chalk from "chalk";
 import { program } from "commander";
 import dayjs from "dayjs";
 import pkg from "./package.json";
-import { fetchAllCourts } from "./src/api";
+import type { WalkUpResult } from "./src/api";
+import { fetchAllCourts, fetchWalkUpSpots } from "./src/api";
 import { formatDateLabel } from "./src/format";
 import type { Coords } from "./src/geo";
 import { getCurrentLocation } from "./src/geo";
@@ -165,13 +166,19 @@ program
 			console.log(chalk.yellow(`${errors} court(s) failed to load.`));
 		}
 
+		// Walk-up pickleball has no schedule to check — it's directory data
+		const walkUps = sports.includes("pickleball")
+			? await fetchWalkUpSpots(ref, opts.maxDistance)
+			: [];
+
 		if (opts.json) {
-			console.log(JSON.stringify(results, null, 2));
+			console.log(JSON.stringify({ courts: results, walkUps }, null, 2));
 			return;
 		}
 
 		if (results.length === 0) {
 			console.log(chalk.yellow("No courts found with available slots."));
+			printWalkUps(walkUps);
 			return;
 		}
 
@@ -182,9 +189,15 @@ program
 					? chalk.green(`${r.totalAvailableSlots} slots`)
 					: chalk.red("no slots");
 
+			const walkUpStr = r.walkUp?.courts
+				? chalk.dim(`  +${r.walkUp.courts} walk-up`)
+				: "";
+
 			const link = `\x1b]8;;${r.url}\x1b\\${r.name}\x1b]8;;\x1b\\`;
-			console.log(`${chalk.bold(link)} ${distStr} — ${slotsStr}`);
+			console.log(`${chalk.bold(link)} ${distStr} — ${slotsStr}${walkUpStr}`);
 			console.log(chalk.dim(`  ${r.address} · ${r.url}`));
+			if (r.walkUp?.openPlay)
+				console.log(chalk.dim(`  Open play: ${r.walkUp.openPlay}`));
 
 			const sportRank = (s: Sport | null): number =>
 				s ? sports.indexOf(s) : sports.length;
@@ -225,10 +238,36 @@ program
 			console.log();
 		}
 
+		printWalkUps(walkUps);
+
 		console.log(
 			chalk.dim(`${results.length} courts shown. Book at https://www.rec.us`),
 		);
 	});
+
+function printWalkUps(spots: WalkUpResult[]): void {
+	if (spots.length === 0) return;
+	console.log(chalk.bold("Walk-up pickleball — no booking"));
+	const width = Math.max(...spots.map((s) => s.name.length));
+	for (const s of spots) {
+		const dist = s.distance != null ? `${s.distance} mi` : "—";
+		const courts =
+			s.courts > 0
+				? `${s.courts} court${s.courts === 1 ? "" : "s"}`
+				: "open play only";
+		const link = s.url
+			? `\x1b]8;;${s.url}\x1b\\${s.name}\x1b]8;;\x1b\\`
+			: s.name;
+		console.log(
+			`  ${link}${" ".repeat(width - s.name.length)}  ${chalk.dim(dist.padStart(7))}  ${courts}`,
+		);
+		if (s.openPlay)
+			console.log(
+				chalk.dim(`  ${" ".repeat(width)}  Open play: ${s.openPlay}`),
+			);
+	}
+	console.log();
+}
 
 const loc = program.command("location").description("Manage saved locations");
 

@@ -36,6 +36,8 @@ The court list is fetched dynamically at runtime from two sfrecpark.org pages an
 
 These tags are only used to skip locations that can't have the requested sport. The authoritative per-court sport comes from the schedule API's `sports[].name`. If the pickleball page fails to load, the run degrades to tennis-only rather than erroring.
 
+The pickleball table also carries walk-up play, in two columns: `Walk-up shared use` (a court count) and `Dedicated open play` (either a court count or free-text hours — numeric values are added to the court count, prose is shown verbatim). Rows with walk-up play but no rec.us link become `WalkUpSpot`s; since they aren't on rec.us, their coordinates are scraped from the `Latitude`/`Longitude` pair embedded in their sfrecpark.org facility page and cached with the court list.
+
 ## How the API Works
 
 1. **Resolve location ID** — scrape `rec.us/{slug}` HTML/RSC for the location UUID (og:url or escaped `locationId`)
