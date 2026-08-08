@@ -1,7 +1,6 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { readJson, writeJson } from "./fs-utils";
 import { geocode } from "./geo";
+import { LOCATIONS_FILE } from "./paths";
 
 export interface Location {
 	name: string;
@@ -10,9 +9,6 @@ export interface Location {
 	lng: number | null;
 	default?: boolean;
 }
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOCATIONS_FILE = resolve(__dirname, "..", "locations.json");
 
 function readLocationsFile(): Location[] {
 	return readJson<Location[]>(LOCATIONS_FILE, []) ?? [];

@@ -20,7 +20,7 @@ bun link  # makes `tennis` available globally
 │   └── locations.ts    Saved location management
 ├── .github/workflows/
 │   └── notify.yml      Cron notification workflow
-└── locations.json      User's saved locations (gitignored)
+└── (user data)         ~/.config/sf-tennis-cli/locations.json
 ```
 
 ## Court List

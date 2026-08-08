@@ -1,6 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { readJson, writeJson } from "./fs-utils";
+import { COURTS_CACHE_FILE } from "./paths";
 
 export interface Court {
 	slug: string;
@@ -15,8 +14,7 @@ interface CourtsCache {
 const SFRECPARK_URL = "https://sfrecpark.org/1446/Reservable-Tennis-Courts";
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CACHE_FILE = resolve(__dirname, "..", ".cache", "courts.json");
+const CACHE_FILE = COURTS_CACHE_FILE;
 
 let _courts: Court[] | null = null;
 let _inflight: Promise<Court[]> | null = null;

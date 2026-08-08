@@ -24,7 +24,8 @@ tennis location add work "123 Main St, San Francisco, CA"
 tennis location add gym "1 Fitness Way, San Francisco, CA"
 ```
 
-Addresses are automatically geocoded via the US Census Bureau API (free, no key needed). Coordinates are cached in `locations.json`.
+Addresses are automatically geocoded via the US Census Bureau API (free, no key needed). Coordinates are saved to `~/.config/sf-tennis-cli/locations.json`.
+
 
 ## Usage
 
