@@ -45,6 +45,7 @@ interface GroupedNotification {
 }
 
 interface CourtFailure {
+	slug: string;
 	name: string;
 	reason: string;
 }
@@ -52,6 +53,8 @@ interface CourtFailure {
 interface CourtCheckResult {
 	notifications: SlotNotification[];
 	failures: CourtFailure[];
+	/** True = beyond MAX_DISTANCE, false = in range, undefined = never resolved. */
+	far?: boolean;
 }
 
 type DedupCache = Record<string, number>;
@@ -68,6 +71,8 @@ const WINDOW_ALERT_MINS = 20;
 
 const FAILURE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const FAILURE_ALERT_KEY = "alert:court-failures";
+const CRASH_ALERT_KEY = "alert:crash";
+const FAR_PREFIX = "far:";
 
 if (!HOME_LAT || !HOME_LNG || !NTFY_TOPIC) {
 	console.error("Missing required env vars: HOME_LAT, HOME_LNG, NTFY_TOPIC");
@@ -151,13 +156,16 @@ async function checkCourt(
 	if (!locData) {
 		return {
 			notifications,
-			failures: [{ name: court.name, reason: "location unavailable" }],
+			failures: [
+				{ slug: court.slug, name: court.name, reason: "location unavailable" },
+			],
 		};
 	}
 
 	const dist = distanceMiles(HOME, locData);
-	if (dist > MAX_DISTANCE) return { notifications, failures: [] };
+	if (dist > MAX_DISTANCE) return { notifications, failures: [], far: true };
 
+	const failures: CourtFailure[] = [];
 	const now = new Date();
 
 	const schedResults = await Promise.all(
@@ -169,11 +177,15 @@ async function checkCourt(
 		}),
 	);
 
-	if (schedResults.every(({ schedRes }) => !schedRes)) {
-		return {
-			notifications,
-			failures: [{ name: court.name, reason: "schedule unavailable" }],
-		};
+	const failedDates = schedResults.filter(({ schedRes }) => !schedRes);
+	if (failedDates.length > 0) {
+		failures.push({
+			slug: court.slug,
+			name: court.name,
+			reason: `schedule unavailable for ${failedDates.length}/${dates.length} date(s): ${failedDates
+				.map(({ date }) => date)
+				.join(", ")}`,
+		});
 	}
 
 	for (const { date, schedRes } of schedResults) {
@@ -228,7 +240,7 @@ async function checkCourt(
 		}
 	}
 
-	return { notifications, failures: [] };
+	return { notifications, failures, far: false };
 }
 
 function runUrl(): string {
@@ -236,6 +248,23 @@ function runUrl(): string {
 	return GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
 		? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
 		: "https://www.rec.us";
+}
+
+/** Send at most once per cooldown. Never throws. */
+async function notifyThrottled(
+	cache: DedupCache,
+	key: string,
+	params: NotifyParams,
+): Promise<boolean> {
+	if (Date.now() - (cache[key] ?? 0) < FAILURE_ALERT_COOLDOWN_MS) return false;
+	try {
+		await notify(params);
+	} catch (e) {
+		console.warn(`  [alert failed] ${(e as Error).message}`);
+		return false;
+	}
+	cache[key] = Date.now();
+	return true;
 }
 
 async function reportFailures(
@@ -246,18 +275,14 @@ async function reportFailures(
 	if (failures.length === 0) return;
 	console.warn(`${failures.length}/${total} location(s) failed to load.`);
 
-	const lastAlert = dedupCache[FAILURE_ALERT_KEY] ?? 0;
-	if (Date.now() - lastAlert < FAILURE_ALERT_COOLDOWN_MS) return;
-
-	await notify({
+	const sent = await notifyThrottled(dedupCache, FAILURE_ALERT_KEY, {
 		title: `Tennis check failed - ${failures.length}/${total} locations`,
 		body: failures.map((f) => `${f.name}: ${f.reason}`).join("\n"),
 		tags: "warning",
 		priority: "high",
 		click: runUrl(),
 	});
-	dedupCache[FAILURE_ALERT_KEY] = Date.now();
-	console.log("Sent failure alert.");
+	if (sent) console.log("Sent failure alert.");
 }
 
 async function main(): Promise<void> {
@@ -266,6 +291,7 @@ async function main(): Promise<void> {
 		console.log("No target dates in the next 10 days.");
 		return;
 	}
+	const dedupCache = loadDedupCache();
 	const courts = await getCourts();
 	console.log(`Checking ${courts.length} locations...`);
 
@@ -280,22 +306,30 @@ async function main(): Promise<void> {
 					console.warn(`  [error] ${c.name}: ${e.message}`);
 					return {
 						notifications: [],
-						failures: [{ name: c.name, reason: e.message }],
+						failures: [{ slug: c.slug, name: c.name, reason: e.message }],
 					};
 				}),
 			),
 		);
-		for (const r of results) {
+		results.forEach((r, idx) => {
 			notifications.push(...r.notifications);
 			failures.push(...r.failures);
-		}
+			const key = FAR_PREFIX + batch[idx].slug;
+			if (r.far === true) dedupCache[key] = Date.now();
+			else if (r.far === false) delete dedupCache[key];
+		});
 	}
 
 	const dedupKeys = (n: SlotNotification): string[] =>
 		n._slotKeys || (n._dedupKey ? [n._dedupKey] : []);
 
-	const dedupCache = loadDedupCache();
-	await reportFailures(failures, courts.length, dedupCache);
+	const reportable = failures.filter((f) => !dedupCache[FAR_PREFIX + f.slug]);
+	if (failures.length > reportable.length) {
+		console.warn(
+			`Ignoring ${failures.length - reportable.length} failure(s) for out-of-range locations.`,
+		);
+	}
+	await reportFailures(reportable, courts.length, dedupCache);
 	const fresh = notifications.filter((n) =>
 		dedupKeys(n).some((k) => !dedupCache[k]),
 	);
@@ -350,12 +384,21 @@ async function main(): Promise<void> {
 
 main().catch(async (e: Error) => {
 	console.error(e);
-	await notify({
-		title: "Tennis notifier crashed",
-		body: e.message,
-		tags: "rotating_light",
-		priority: "high",
-		click: runUrl(),
-	}).catch(() => {});
+	const dedupCache = loadDedupCache();
+	if (
+		await notifyThrottled(dedupCache, CRASH_ALERT_KEY, {
+			title: "Tennis notifier crashed",
+			body: e.message,
+			tags: "rotating_light",
+			priority: "high",
+			click: runUrl(),
+		})
+	) {
+		try {
+			writeJson(DEDUP_FILE, dedupCache);
+		} catch (err) {
+			console.warn(`  [cache] ${(err as Error).message}`);
+		}
+	}
 	process.exit(1);
 });

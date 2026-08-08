@@ -119,7 +119,7 @@ const HEADERS: Record<string, string> = {
 export function extractLocationId(html: string): string | null {
 	return (
 		html.match(/rec\.us\/locations\/([a-f0-9-]{36})/i)?.[1] ??
-		html.match(/\\?"locationId\\?":\\?"([a-f0-9-]{36})\\?"/)?.[1] ??
+		html.match(/\\?"locationId\\?":\\?"([a-f0-9-]{36})\\?"/i)?.[1] ??
 		null
 	);
 }
@@ -130,7 +130,8 @@ export async function resolveLocationId(slug: string): Promise<string | null> {
 	if (cached) return cached;
 	const res = await fetch(`${REC_US_BASE}/${slug}`, { headers: HEADERS });
 	if (!res.ok) return null;
-	const id = extractLocationId(await res.text());
+	// `/{slug}` 308-redirects to `/locations/{uuid}`; the body scrape is a fallback
+	const id = extractLocationId(res.url) ?? extractLocationId(await res.text());
 	if (id) _locationIdCache.set(slug, id);
 	return id;
 }

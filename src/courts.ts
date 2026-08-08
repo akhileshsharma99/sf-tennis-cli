@@ -48,6 +48,29 @@ function writeCache(courts: Court[]): void {
 	}
 }
 
+const ENTITIES: Record<string, string> = {
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	apos: "'",
+	nbsp: " ",
+};
+
+/** Decode HTML entities in court names. */
+export function decodeEntities(text: string): string {
+	return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body: string) => {
+		if (body[0] === "#") {
+			const code =
+				body[1]?.toLowerCase() === "x"
+					? parseInt(body.slice(2), 16)
+					: parseInt(body.slice(1), 10);
+			return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+		}
+		return ENTITIES[body.toLowerCase()] ?? whole;
+	});
+}
+
 /** Parse court slug/name pairs from the SF Rec & Park reservable-courts page. */
 export function parseCourtsFromHtml(html: string): Court[] {
 	const seen = new Map<string, Court>();
@@ -57,21 +80,23 @@ export function parseCourtsFromHtml(html: string): Court[] {
 	for (const match of html.matchAll(withLabel)) {
 		const slug = match[1].toLowerCase();
 		if (seen.has(slug)) continue;
-		seen.set(slug, { slug, name: match[2].trim() });
+		const name = decodeEntities(match[2]).trim();
+		if (!name) continue;
+		seen.set(slug, { slug, name });
 	}
-	if (seen.size > 0) return [...seen.values()];
 
-	// Fallback: link text (older page layout)
+	// Then link text, for rows without an aria-label
 	const withText =
 		/href="https?:\/\/(?:www\.)?rec\.us\/([a-z0-9-]+)"[^>]*>([^<]+)/gi;
 	for (const match of html.matchAll(withText)) {
 		const slug = match[1].toLowerCase();
 		if (seen.has(slug)) continue;
-		const name = match[2]
+		const name = decodeEntities(match[2])
 			.trim()
 			.replace(/\s*Tennis\s*Court.*$/i, "")
 			.trim();
-		if (!name || /^\d+$/.test(name)) continue;
+		// The current layout renders link text as a court count (">4")
+		if (!name || /^[>\s]*\d+$/.test(name)) continue;
 		seen.set(slug, { slug, name });
 	}
 	return [...seen.values()];

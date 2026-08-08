@@ -13,9 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      # split restore/save so the cache is still written when the run fails
+      - uses: actions/cache/restore@v4
         with:
-          path: .cache
+          path: |
+            .cache
+            ~/.cache/sf-tennis-cli
           key: courts-${{ github.run_id }}
           restore-keys: courts-
       - uses: oven-sh/setup-bun@v2
@@ -29,3 +32,10 @@ jobs:
           PREF_DAYS: ${{ vars.PREF_DAYS }}
           PREF_START_HOUR: ${{ vars.PREF_START_HOUR }}
           PREF_END_HOUR: ${{ vars.PREF_END_HOUR }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            .cache
+            ~/.cache/sf-tennis-cli
+          key: courts-${{ github.run_id }}
