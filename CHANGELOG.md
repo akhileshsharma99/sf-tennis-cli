@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.0](https://github.com/akhileshsharma99/sf-tennis-cli/compare/v1.2.0...v1.3.0) (2026-08-24)
+
+
+### Features
+
+* add pickleball support ([7c59e50](https://github.com/akhileshsharma99/sf-tennis-cli/commit/7c59e5067c58ad920c6da4988135a7aa134b5b3a))
+* add walk-up pickleball courts ([3c21ae2](https://github.com/akhileshsharma99/sf-tennis-cli/commit/3c21ae2e8e2d89b6f63a809c7e22fa68105ed2a2))
+* add walk-up tennis courts, and fix review findings ([054b5d1](https://github.com/akhileshsharma99/sf-tennis-cli/commit/054b5d1186a87e2ec2a88ddc36b5692958d1c6d3))
+* make --version report which install is running ([f9c76c7](https://github.com/akhileshsharma99/sf-tennis-cli/commit/f9c76c7563d0191dc699bc20e23e2e318610c43d))
+
 ## [1.2.0](https://github.com/akhileshsharma99/sf-tennis-cli/compare/v1.1.1...v1.2.0) (2026-08-08)
 
 
